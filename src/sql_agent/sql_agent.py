@@ -18,6 +18,7 @@ MAX_RETRIES = int(os.getenv("MAX_RETRIES", 2))
 ALLOWED_MART_SCHEMA = os.getenv("ALLOWED_MART_SCHEMA", "analytics")
 ALLOW_MART_WRITE = os.getenv("ALLOW_MART_WRITE", "true").lower() == "true"
 
+# hello
 
 # -----------------------------
 # Pydantic Models
