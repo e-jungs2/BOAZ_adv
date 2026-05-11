@@ -17,6 +17,7 @@ wheels/
 *.db
 *.sqlite3
 *.json
+.data_agent/
 gx/uncommitted/
 
 .DS_Store
