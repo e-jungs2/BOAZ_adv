@@ -18,6 +18,9 @@ wheels/
 *.sqlite3
 *.json
 .data_agent/
+.pytest_cache/
+.pytest_tmp/
+.test_data/
 gx/uncommitted/
 
 .DS_Store
