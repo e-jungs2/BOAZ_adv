@@ -93,7 +93,7 @@ class AnalysisPlan(BaseModel):
     dimension: str | None = None
     filters: list[str] = Field(default_factory=list)
     requires_mart_review: bool = False
-    required_agents: list[str] = Field(default_factory=lambda: ["sql_agent", "report_agent"])
+    route_kind: Literal["simple", "eda", "trend", "mart"] = "simple"
     source_sql: str = "SELECT 1 AS sample_value"
 
 
@@ -111,6 +111,10 @@ class OrchestrationState(BaseModel):
     approval_ids: list[str] = Field(default_factory=list)
     error_state: dict[str, Any] = Field(default_factory=dict)
     terminal_state: SupervisorTerminalState | None = None
+    remaining_agents: list[str] = Field(default_factory=list)
+    completed_agents: list[str] = Field(default_factory=list)
+    last_agent: str | None = None
+    route_kind: str = "simple"
 
     def add_artifacts(self, key: str, artifact_ids: list[str]) -> None:
         if not artifact_ids:

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
+from typing import Any
+
 from data_agent_backend.models.approvals import ApprovalStatus
 from data_agent_backend.models.runs import RunStatus
 
-from sql_agent_orchestration.agents import (
+from DATA_Analyst_Assistant_Agent.agents import (
     AgentRuntime,
     AnalysisAgent,
     CentralValidationAgent,
@@ -12,8 +15,8 @@ from sql_agent_orchestration.agents import (
     SQLAgent,
     VisualizationAgent,
 )
-from sql_agent_orchestration.backend_adapter import BackendAdapter
-from sql_agent_orchestration.models import (
+from DATA_Analyst_Assistant_Agent.backend_adapter import BackendAdapter
+from DATA_Analyst_Assistant_Agent.models import (
     AgentEnvelope,
     AgentStatus,
     AnalysisPlan,
@@ -23,12 +26,7 @@ from sql_agent_orchestration.models import (
 
 
 class SQLAgentSupervisor:
-    """Minimal LangGraph-compatible supervisor skeleton.
-
-    This is intentionally route-driven instead of a fixed serial chain. The
-    parse_plan node chooses the required specialist agents, then the supervisor
-    gates each handoff through central validation.
-    """
+    """LangGraph-compatible orchestration supervisor for DATA_Analyst_Assistant_Agent."""
 
     def __init__(
         self,
@@ -40,6 +38,7 @@ class SQLAgentSupervisor:
         analysis_agent: AnalysisAgent | None = None,
         visualization_agent: VisualizationAgent | None = None,
         report_agent: ReportAgent | None = None,
+        build_runtime_graph: bool = True,
     ) -> None:
         self.adapter = adapter
         self.runtime = AgentRuntime(adapter)
@@ -50,12 +49,17 @@ class SQLAgentSupervisor:
         self.visualization_agent = visualization_agent or VisualizationAgent()
         self.report_agent = report_agent or ReportAgent()
         self.agent_registry = {
-            "sql_agent": self.sql_agent,
-            "eda_agent": self.eda_agent,
-            "analysis_agent": self.analysis_agent,
-            "visualization_agent": self.visualization_agent,
-            "report_agent": self.report_agent,
+            self.sql_agent.name: self.sql_agent,
+            self.eda_agent.name: self.eda_agent,
+            self.analysis_agent.name: self.analysis_agent,
+            self.visualization_agent.name: self.visualization_agent,
+            self.report_agent.name: self.report_agent,
         }
+        self.graph = None
+        if build_runtime_graph:
+            from DATA_Analyst_Assistant_Agent.graph import build_graph
+
+            self.graph = build_graph(adapter, supervisor=self)
 
     def run(self, user_query: str, *, thread_id: str | None = None) -> OrchestrationState:
         run = self.adapter.create_run(thread_id=thread_id, metadata={"entrypoint": "sql_agent_supervisor"})
@@ -64,21 +68,20 @@ class SQLAgentSupervisor:
         self.adapter.append_run_event(state.run_id, "supervisor.started", "Supervisor started.", node_name="start")
 
         try:
-            self.parse_plan(state)
-            for agent in self._agent_sequence(state):
-                state.current_step = agent.name
-                self.adapter.append_run_event(state.run_id, "agent.started", f"{agent.name} started.", node_name=agent.name)
-                envelope = agent.run(state, self.runtime)
-                self._record_agent_result(state, envelope)
+            graph = self.graph
+            if graph is None:
+                from DATA_Analyst_Assistant_Agent.graph import build_graph
 
-                validation = self.central_validate(state, envelope)
-                self._record_agent_result(state, validation)
-                gate = self.supervisor_gate(state, envelope, validation)
-                if gate != "continue":
-                    return state
-
-            self.finalize(state)
-            return state
+                graph = build_graph(self.adapter, supervisor=self)
+            result = graph.invoke(
+                {
+                    "state": state,
+                    "last_agent_result": None,
+                    "last_validation_result": None,
+                    "gate_result": None,
+                }
+            )
+            return result["state"]
         except Exception as exc:
             state.error_state = {"type": type(exc).__name__, "message": str(exc), "step": state.current_step}
             state.terminal_state = SupervisorTerminalState.failed_terminal
@@ -92,78 +95,45 @@ class SQLAgentSupervisor:
             self.adapter.update_run_status(state.run_id, RunStatus.failed, metadata={"terminal_state": state.terminal_state.value})
             return state
 
-    def parse_plan(self, state: OrchestrationState) -> None:
-        normalized = state.user_query.casefold()
-        requires_mart = self._contains_any(
-            normalized,
-            "repeat",
-            "reusable",
-            "datamart",
-            "mart",
-            "save",
-            "\ubc18\ubcf5",
-            "\ub370\uc774\ud130\ub9c8\ud2b8",
-            "\ub9c8\ud2b8",
-            "\uc800\uc7a5",
-            "\uc7ac\uc0ac\uc6a9",
+    def parse_plan(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        state = graph_state["state"]
+        query = state.user_query
+        query_lower = query.lower()
+
+        requires_mart = any(token in query for token in ("반복", "데이터마트", "마트", "저장", "재사용"))
+        wants_trend = any(token in query_lower for token in ("trend", "monthly", "chart")) or any(
+            token in query for token in ("월별", "추이", "차트", "시각화")
         )
-        wants_trend = self._contains_any(normalized, "trend", "monthly", "\uc6d4\ubcc4", "\ucd94\uc774")
-        wants_eda = self._contains_any(
-            normalized,
-            "eda",
-            "profile",
-            "quality",
-            "missing",
-            "duplicate",
-            "outlier",
-            "distribution",
-            "\ud488\uc9c8",
-            "\uacb0\uce21",
-            "\uc911\ubcf5",
-            "\uc774\uc0c1\uce58",
-            "\ubd84\ud3ec",
-        )
-        wants_analysis = wants_trend or self._contains_any(
-            normalized,
-            "analysis",
-            "analyze",
-            "insight",
-            "hypothesis",
-            "stat",
-            "compare",
-            "\ubd84\uc11d",
-            "\uc778\uc0ac\uc774\ud2b8",
-            "\uac00\uc124",
-            "\ube44\uad50",
-        )
-        wants_visualization = wants_trend or self._contains_any(
-            normalized,
-            "chart",
-            "visual",
-            "visualization",
-            "plot",
-            "graph",
-            "\ucc28\ud2b8",
-            "\uc2dc\uac01\ud654",
-            "\uadf8\ub798\ud504",
+        wants_eda = any(token in query_lower for token in ("eda", "profile", "profiling", "quality")) or any(
+            token in query for token in ("프로파일", "품질", "컬럼", "결측")
         )
 
-        required_agents = ["sql_agent"]
-        if wants_eda:
-            required_agents.append("eda_agent")
-        if wants_analysis:
-            required_agents.append("analysis_agent")
-        if wants_visualization:
-            required_agents.append("visualization_agent")
-        required_agents.append("report_agent")
+        if requires_mart:
+            route_kind = "mart"
+            goal = "재사용 가능한 마트 후보 검토"
+            remaining_agents = [self.sql_agent.name]
+        elif wants_trend:
+            route_kind = "trend"
+            goal = "월별 추이 분석"
+            remaining_agents = [self.sql_agent.name, self.analysis_agent.name, self.visualization_agent.name, self.report_agent.name]
+        elif wants_eda:
+            route_kind = "eda"
+            goal = "데이터 프로파일 및 품질 요약"
+            remaining_agents = [self.sql_agent.name, self.eda_agent.name, self.report_agent.name]
+        else:
+            route_kind = "simple"
+            goal = "SQL 기반 질의 응답"
+            remaining_agents = [self.sql_agent.name, self.report_agent.name]
 
-        state.goal = "monthly trend analysis" if wants_trend else "SQL-backed response"
+        state.goal = goal
+        state.route_kind = route_kind
+        state.remaining_agents = remaining_agents
         state.plan = AnalysisPlan(
-            goal=state.goal,
-            metric="revenue" if self._contains_any(normalized, "revenue", "sales", "\ub9e4\ucd9c") else None,
-            dimension="month" if wants_trend else None,
+            goal=goal,
+            metric="매출" if "매출" in query else None,
+            dimension="월" if wants_trend else None,
             requires_mart_review=requires_mart,
-            required_agents=required_agents,
+            route_kind=route_kind,
             source_sql="SELECT 1 AS sample_value",
         )
         state.current_step = "parse_plan"
@@ -172,15 +142,51 @@ class SQLAgentSupervisor:
             "supervisor.plan_created",
             "Execution plan created.",
             node_name="parse_plan",
-            metadata=state.plan.model_dump(mode="json"),
+            metadata={
+                **state.plan.model_dump(mode="json"),
+                "remaining_agents": list(state.remaining_agents),
+            },
         )
+        return {
+            **graph_state,
+            "state": state,
+            "last_agent_result": None,
+            "last_validation_result": None,
+            "gate_result": None,
+        }
 
-    def central_validate(self, state: OrchestrationState, upstream: AgentEnvelope) -> AgentEnvelope:
+    def call_next_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        state = graph_state["state"]
+        if not state.remaining_agents:
+            raise RuntimeError("No remaining agents available for dispatch.")
+
+        agent_name = state.remaining_agents.pop(0)
+        agent = self.agent_registry[agent_name]
+        state.current_step = agent.name
+        self.adapter.append_run_event(state.run_id, "agent.started", f"{agent.name} started.", node_name=agent.name)
+        envelope = agent.run(state, self.runtime)
+        self._record_agent_result(state, envelope)
+        state.last_agent = envelope.agent_name
+        state.completed_agents.append(envelope.agent_name)
+        return {**graph_state, "state": state, "last_agent_result": envelope}
+
+    def central_validate(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        state = graph_state["state"]
+        upstream = graph_state["last_agent_result"]
+        if upstream is None:
+            raise RuntimeError("Validation requires an upstream agent result.")
         validation = self.validation_agent.run(state, self.runtime, upstream)
         state.validation_status = validation.status.value
-        return validation
+        self._record_agent_result(state, validation)
+        return {**graph_state, "state": state, "last_validation_result": validation}
 
-    def supervisor_gate(self, state: OrchestrationState, upstream: AgentEnvelope, validation: AgentEnvelope) -> str:
+    def supervisor_gate(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        state = graph_state["state"]
+        upstream = graph_state["last_agent_result"]
+        validation = graph_state["last_validation_result"]
+        if upstream is None or validation is None:
+            raise RuntimeError("Supervisor gate requires upstream and validation results.")
+
         if validation.status == AgentStatus.failed:
             if validation.retry_hint.retryable:
                 state.terminal_state = SupervisorTerminalState.failed_with_recoverable_context
@@ -189,10 +195,10 @@ class SQLAgentSupervisor:
                     RunStatus.failed,
                     metadata={"terminal_state": state.terminal_state.value, "retry_hint": validation.retry_hint.model_dump(mode="json")},
                 )
-                return "failed_with_recoverable_context"
+                return {**graph_state, "state": state, "gate_result": "failed_with_recoverable_context"}
             state.terminal_state = SupervisorTerminalState.failed_terminal
             self.adapter.update_run_status(state.run_id, RunStatus.failed, metadata={"terminal_state": state.terminal_state.value})
-            return "failed_terminal"
+            return {**graph_state, "state": state, "gate_result": "failed_terminal"}
 
         if upstream.approval.required or validation.approval.required:
             approval = self.adapter.request_approval(
@@ -220,9 +226,26 @@ class SQLAgentSupervisor:
                 RunStatus.waiting_approval,
                 metadata={"terminal_state": state.terminal_state.value, "approval_id": approval.approval_id},
             )
-            return "needs_user_approval"
+            return {**graph_state, "state": state, "gate_result": "needs_user_approval"}
 
-        return "continue"
+        return {**graph_state, "state": state, "gate_result": "continue"}
+
+    def route_after_gate(self, graph_state: dict[str, Any]) -> str:
+        state = graph_state["state"]
+        gate_result = graph_state.get("gate_result")
+        if gate_result == "continue":
+            return "call_next_agent" if state.remaining_agents else "finalize"
+        if gate_result in {"failed_with_recoverable_context", "failed_terminal", "needs_user_approval"}:
+            return "end"
+        return "end"
+
+    def finalize(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        state = graph_state["state"]
+        state.current_step = "finalize"
+        state.terminal_state = SupervisorTerminalState.completed
+        self.adapter.append_run_event(state.run_id, "supervisor.completed", "Supervisor completed.", node_name="finalize")
+        self.adapter.update_run_status(state.run_id, RunStatus.succeeded, metadata={"terminal_state": state.terminal_state.value})
+        return {**graph_state, "state": state}
 
     def resume_after_approval(self, state: OrchestrationState, approval_id: str) -> OrchestrationState:
         approval = self.adapter.get_approval_status(approval_id)
@@ -244,15 +267,8 @@ class SQLAgentSupervisor:
         state.add_artifacts("mart_metadata", [mart_ref.artifact_id])
         return state
 
-    def finalize(self, state: OrchestrationState) -> None:
-        state.current_step = "finalize"
-        state.terminal_state = SupervisorTerminalState.completed
-        self.adapter.append_run_event(state.run_id, "supervisor.completed", "Supervisor completed.", node_name="finalize")
-        self.adapter.update_run_status(state.run_id, RunStatus.succeeded, metadata={"terminal_state": state.terminal_state.value})
-
-    def _agent_sequence(self, state: OrchestrationState) -> list[object]:
-        requested = state.plan.required_agents if state.plan else ["sql_agent", "report_agent"]
-        return [self.agent_registry[name] for name in requested if name in self.agent_registry]
+    def _agent_sequence(self) -> Iterable[object]:
+        return tuple(self.agent_registry[name] for name in self.agent_registry)
 
     def _record_agent_result(self, state: OrchestrationState, envelope: AgentEnvelope) -> None:
         state.add_artifacts(envelope.agent_name, envelope.artifact_ids())
@@ -268,6 +284,3 @@ class SQLAgentSupervisor:
                 "approval_required": envelope.approval.required,
             },
         )
-
-    def _contains_any(self, value: str, *needles: str) -> bool:
-        return any(needle in value for needle in needles)

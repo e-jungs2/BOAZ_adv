@@ -10,7 +10,7 @@ from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.approvals import ApprovalDecision, ApprovalStatus
 from data_agent_backend.models.artifacts import ArtifactType
 from data_agent_backend.models.runs import RunStatus
-from sql_agent_orchestration import BackendAdapter, SQLAgentSupervisor, SupervisorTerminalState
+from DATA_Analyst_Assistant_Agent import BackendAdapter, SQLAgentSupervisor, SupervisorTerminalState, build_graph
 
 
 @pytest.fixture()
@@ -21,6 +21,10 @@ def adapter() -> BackendAdapter:
         yield BackendAdapter(config=config)
     finally:
         shutil.rmtree(base_dir, ignore_errors=True)
+
+
+def run_events(adapter: BackendAdapter, run_id: str) -> list[tuple[str | None, str]]:
+    return [(event.node_name, event.event_type) for event in adapter.services.run_service.list_events(run_id)]
 
 
 def test_adapter_contract_creates_run_event_artifact_policy_and_approval(adapter: BackendAdapter) -> None:
@@ -57,13 +61,19 @@ def test_sql_preview_allows_select_and_blocks_write_sql(adapter: BackendAdapter)
     assert getattr(exc_info.value, "code", "") == "POLICY_BLOCKED"
 
 
-def test_supervisor_simple_query_runs_sql_and_report_only(adapter: BackendAdapter) -> None:
+def test_graph_build_returns_invokable_graph(adapter: BackendAdapter) -> None:
+    graph = build_graph(adapter)
+
+    assert graph is not None
+    assert hasattr(graph, "invoke")
+
+
+def test_supervisor_simple_query_routes_sql_and_report_only(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("Show a simple revenue summary.")
+    state = supervisor.run("간단한 매출 요약을 보여줘")
 
     assert state.terminal_state == SupervisorTerminalState.completed
-    assert state.plan is not None
-    assert state.plan.required_agents == ["sql_agent", "report_agent"]
+    assert state.route_kind == "simple"
     assert "sql_agent" in state.artifact_ids
     assert "report_agent" in state.artifact_ids
     assert "eda_agent" not in state.artifact_ids
@@ -77,14 +87,43 @@ def test_supervisor_simple_query_runs_sql_and_report_only(adapter: BackendAdapte
     assert report_artifact.type == ArtifactType.report
 
 
+def test_supervisor_eda_query_routes_sql_eda_and_report_only(adapter: BackendAdapter) -> None:
+    supervisor = SQLAgentSupervisor(adapter)
+    state = supervisor.run("매출 데이터 프로파일과 품질 요약을 보여줘")
+
+    assert state.terminal_state == SupervisorTerminalState.completed
+    assert state.route_kind == "eda"
+    assert set(state.artifact_ids) >= {"sql_agent", "eda_agent", "report_agent", "validation_agent"}
+    assert "analysis_agent" not in state.artifact_ids
+    assert "visualization_agent" not in state.artifact_ids
+
+    started_nodes = [node for node, event_type in run_events(adapter, state.run_id) if event_type == "agent.started"]
+    assert started_nodes == ["sql_agent", "eda_agent", "report_agent"]
+
+
+def test_supervisor_trend_query_routes_sql_analysis_visualization_and_report(adapter: BackendAdapter) -> None:
+    supervisor = SQLAgentSupervisor(adapter)
+    state = supervisor.run("월별 매출 추이를 차트로 보여줘")
+
+    assert state.terminal_state == SupervisorTerminalState.completed
+    assert state.route_kind == "trend"
+    assert set(state.artifact_ids) >= {"sql_agent", "analysis_agent", "visualization_agent", "report_agent", "validation_agent"}
+    assert "eda_agent" not in state.artifact_ids
+
+    started_nodes = [node for node, event_type in run_events(adapter, state.run_id) if event_type == "agent.started"]
+    assert started_nodes == ["sql_agent", "analysis_agent", "visualization_agent", "report_agent"]
+
+
 def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("Analyze monthly revenue trend and suggest reusable datamart storage.")
+    state = supervisor.run("월별 매출 추이를 분석하고, 반복 조회가 필요하면 데이터마트 저장을 제안해줘.")
 
     assert state.terminal_state == SupervisorTerminalState.needs_user_approval
+    assert state.route_kind == "mart"
     assert state.approval_ids
     assert "sql_agent" in state.artifact_ids
     assert "validation_agent" in state.artifact_ids
+    assert "report_agent" not in state.artifact_ids
 
     run = adapter.services.run_service.get_run(state.run_id)
     approval = adapter.get_approval_status(state.approval_ids[0])
@@ -95,7 +134,7 @@ def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> N
 
 def test_approval_resume_registers_mart_metadata(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("Create a reusable datamart candidate for repeated lookup.")
+    state = supervisor.run("반복 조회용 데이터마트로 저장할 후보를 만들어줘.")
     approval_id = state.approval_ids[0]
 
     adapter.services.approval_store.resolve_approval_request(approval_id, ApprovalDecision.approve)
@@ -108,33 +147,10 @@ def test_approval_resume_registers_mart_metadata(adapter: BackendAdapter) -> Non
     assert metadata_artifact.metadata["kind"] == "mart_metadata"
 
 
-def test_supervisor_routes_only_requested_eda_agent(adapter: BackendAdapter) -> None:
-    supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("Profile data quality and missing values, then make a report.")
-
-    assert state.terminal_state == SupervisorTerminalState.completed
-    assert state.plan is not None
-    assert state.plan.required_agents == ["sql_agent", "eda_agent", "report_agent"]
-    assert "eda_agent" in state.artifact_ids
-    assert "analysis_agent" not in state.artifact_ids
-    assert "visualization_agent" not in state.artifact_ids
-
-
-def test_supervisor_routes_analysis_and_visualization_for_trend(adapter: BackendAdapter) -> None:
-    supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("Analyze monthly revenue trend with a chart.")
-
-    assert state.terminal_state == SupervisorTerminalState.completed
-    assert state.plan is not None
-    assert state.plan.required_agents == ["sql_agent", "analysis_agent", "visualization_agent", "report_agent"]
-    assert "analysis_agent" in state.artifact_ids
-    assert "visualization_agent" in state.artifact_ids
-
-
 def test_backend_non_modification_guard_paths() -> None:
     changed_contract_paths = [
         "docs/sql_agent_architecture/architecture.md",
-        "sql_agent_orchestration/backend_adapter.py",
+        "DATA_Analyst_Assistant_Agent/backend_adapter.py",
         "tests/test_sql_agent_orchestration.py",
     ]
 

@@ -1,4 +1,4 @@
-from sql_agent_orchestration.agents import (
+from DATA_Analyst_Assistant_Agent.agents import (
     AnalysisAgent,
     CentralValidationAgent,
     EDAAgent,
@@ -6,14 +6,15 @@ from sql_agent_orchestration.agents import (
     SQLAgent,
     VisualizationAgent,
 )
-from sql_agent_orchestration.backend_adapter import BackendAdapter
-from sql_agent_orchestration.models import (
+from DATA_Analyst_Assistant_Agent.backend_adapter import BackendAdapter
+from DATA_Analyst_Assistant_Agent.graph import build_graph
+from DATA_Analyst_Assistant_Agent.models import (
     AgentEnvelope,
     AgentStatus,
     OrchestrationState,
     SupervisorTerminalState,
 )
-from sql_agent_orchestration.supervisor import SQLAgentSupervisor
+from DATA_Analyst_Assistant_Agent.supervisor import SQLAgentSupervisor
 
 __all__ = [
     "AgentEnvelope",
@@ -28,4 +29,5 @@ __all__ = [
     "SQLAgentSupervisor",
     "SupervisorTerminalState",
     "VisualizationAgent",
+    "build_graph",
 ]
