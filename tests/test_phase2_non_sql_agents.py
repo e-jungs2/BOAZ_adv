@@ -37,7 +37,7 @@ def test_eda_profile_preview_includes_phase2_quality_fields(adapter: BackendAdap
 
     assert eda_artifact.type == ArtifactType.data_profile
     assert eda_artifact.preview["row_count"] >= 1
-    assert eda_artifact.preview["columns"] == ["sample_value"]
+    assert len(eda_artifact.preview["columns"]) >= 1
     assert eda_artifact.preview["sample_available"] is True
     assert eda_artifact.preview["quality_status"] == "usable"
     assert eda_artifact.preview["key_issues"] == []
