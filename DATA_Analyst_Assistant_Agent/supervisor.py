@@ -155,13 +155,20 @@ class SQLAgentSupervisor:
             "gate_result": None,
         }
 
-    def call_next_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
-        state = graph_state["state"]
-        if not state.remaining_agents:
-            raise RuntimeError("No remaining agents available for dispatch.")
+    # ── explicit agent nodes ──────────────────────────────────────────────
+    #
+    # Each node runs one specific specialist agent. Routing remains
+    # plan-driven: ``state.remaining_agents`` (built in ``parse_plan``)
+    # decides which node executes next; the nodes themselves are fixed,
+    # meaningful graph steps rather than a generic dispatcher.
 
-        agent_name = state.remaining_agents.pop(0)
+    def _run_agent(self, graph_state: dict[str, Any], agent_name: str) -> dict[str, Any]:
+        state = graph_state["state"]
         agent = self.agent_registry[agent_name]
+        if state.remaining_agents and state.remaining_agents[0] == agent_name:
+            state.remaining_agents.pop(0)
+        elif agent_name in state.remaining_agents:
+            state.remaining_agents.remove(agent_name)
         state.current_step = agent.name
         self.adapter.append_run_event(state.run_id, "agent.started", f"{agent.name} started.", node_name=agent.name)
         envelope = agent.run(state, self.runtime)
@@ -169,6 +176,33 @@ class SQLAgentSupervisor:
         state.last_agent = envelope.agent_name
         state.completed_agents.append(envelope.agent_name)
         return {**graph_state, "state": state, "last_agent_result": envelope}
+
+    def run_sql_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        return self._run_agent(graph_state, self.sql_agent.name)
+
+    def run_eda_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        return self._run_agent(graph_state, self.eda_agent.name)
+
+    def run_analysis_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        return self._run_agent(graph_state, self.analysis_agent.name)
+
+    def run_visualization_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        return self._run_agent(graph_state, self.visualization_agent.name)
+
+    def run_report_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        return self._run_agent(graph_state, self.report_agent.name)
+
+    # Map a planned agent name to its explicit graph node.
+    AGENT_NODES = {
+        "sql_agent": "run_sql_agent",
+        "eda_agent": "run_eda_agent",
+        "analysis_agent": "run_analysis_agent",
+        "visualization_agent": "run_visualization_agent",
+        "report_agent": "run_report_agent",
+    }
+
+    def _agent_node_name(self, agent_name: str) -> str:
+        return self.AGENT_NODES[agent_name]
 
     def central_validate(self, graph_state: dict[str, Any]) -> dict[str, Any]:
         state = graph_state["state"]
@@ -200,43 +234,58 @@ class SQLAgentSupervisor:
             self.adapter.update_run_status(state.run_id, RunStatus.failed, metadata={"terminal_state": state.terminal_state.value})
             return {**graph_state, "state": state, "gate_result": "failed_terminal"}
 
+        # Only DECIDE that approval is needed here. The approval request is
+        # created downstream in ``approval_gate`` so this gate stays a pure
+        # routing decision.
         if upstream.approval.required or validation.approval.required:
-            approval = self.adapter.request_approval(
-                "mart.persist",
-                "mart",
-                {
-                    "reason": upstream.approval.reason or validation.approval.reason,
-                    "run_id": state.run_id,
-                    "source_artifact_ids": upstream.artifact_ids(),
-                    "plan": state.plan.model_dump(mode="json") if state.plan else {},
-                },
-            )
-            state.approval_ids.append(approval.approval_id)
-            state.terminal_state = SupervisorTerminalState.needs_user_approval
-            state.current_step = "approval_gate"
-            self.adapter.append_run_event(
-                state.run_id,
-                "approval.required",
-                "Mart persistence requires approval.",
-                node_name="approval_gate",
-                approval_id=approval.approval_id,
-            )
-            self.adapter.update_run_status(
-                state.run_id,
-                RunStatus.waiting_approval,
-                metadata={"terminal_state": state.terminal_state.value, "approval_id": approval.approval_id},
-            )
-            return {**graph_state, "state": state, "gate_result": "needs_user_approval"}
+            return {**graph_state, "state": state, "gate_result": "needs_approval"}
 
         return {**graph_state, "state": state, "gate_result": "continue"}
+
+    def approval_gate(self, graph_state: dict[str, Any]) -> dict[str, Any]:
+        state = graph_state["state"]
+        upstream = graph_state["last_agent_result"]
+        validation = graph_state["last_validation_result"]
+        if upstream is None or validation is None:
+            raise RuntimeError("Approval gate requires upstream and validation results.")
+
+        approval = self.adapter.request_approval(
+            "mart.persist",
+            "mart",
+            {
+                "reason": upstream.approval.reason or validation.approval.reason,
+                "run_id": state.run_id,
+                "source_artifact_ids": upstream.artifact_ids(),
+                "plan": state.plan.model_dump(mode="json") if state.plan else {},
+            },
+        )
+        state.approval_ids.append(approval.approval_id)
+        state.terminal_state = SupervisorTerminalState.needs_user_approval
+        state.current_step = "approval_gate"
+        self.adapter.append_run_event(
+            state.run_id,
+            "approval.required",
+            "Mart persistence requires approval.",
+            node_name="approval_gate",
+            approval_id=approval.approval_id,
+        )
+        self.adapter.update_run_status(
+            state.run_id,
+            RunStatus.waiting_approval,
+            metadata={"terminal_state": state.terminal_state.value, "approval_id": approval.approval_id},
+        )
+        return {**graph_state, "state": state, "gate_result": "needs_user_approval"}
 
     def route_after_gate(self, graph_state: dict[str, Any]) -> str:
         state = graph_state["state"]
         gate_result = graph_state.get("gate_result")
         if gate_result == "continue":
-            return "call_next_agent" if state.remaining_agents else "finalize"
-        if gate_result in {"failed_with_recoverable_context", "failed_terminal", "needs_user_approval"}:
-            return "end"
+            if state.remaining_agents:
+                return self._agent_node_name(state.remaining_agents[0])
+            return "finalize"
+        if gate_result == "needs_approval":
+            return "approval_gate"
+        # failed_with_recoverable_context / failed_terminal
         return "end"
 
     def finalize(self, graph_state: dict[str, Any]) -> dict[str, Any]:

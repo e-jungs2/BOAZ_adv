@@ -25,22 +25,38 @@ class GraphExecutionState(TypedDict):
     gate_result: str | None
 
 
+AGENT_NODE_NAMES = (
+    "run_sql_agent",
+    "run_eda_agent",
+    "run_analysis_agent",
+    "run_visualization_agent",
+    "run_report_agent",
+)
+
+
 class FallbackCompiledGraph:
+    """Mirrors the explicit-node LangGraph flow when langgraph is absent."""
+
     def __init__(self, supervisor: SQLAgentSupervisor) -> None:
         self.supervisor = supervisor
 
     def invoke(self, graph_state: GraphExecutionState) -> GraphExecutionState:
-        graph_state = self.supervisor.parse_plan(graph_state)
+        sup = self.supervisor
+        graph_state = sup.parse_plan(graph_state)
+        # SQL is always the first explicit agent node after parse_plan.
+        graph_state = sup.run_sql_agent(graph_state)
         while True:
-            graph_state = self.supervisor.call_next_agent(graph_state)
-            graph_state = self.supervisor.central_validate(graph_state)
-            graph_state = self.supervisor.supervisor_gate(graph_state)
-            next_node = self.supervisor.route_after_gate(graph_state)
-            if next_node == "call_next_agent":
-                continue
+            graph_state = sup.central_validate(graph_state)
+            graph_state = sup.supervisor_gate(graph_state)
+            next_node = sup.route_after_gate(graph_state)
+            if next_node == "approval_gate":
+                return sup.approval_gate(graph_state)
             if next_node == "finalize":
-                graph_state = self.supervisor.finalize(graph_state)
-            return graph_state
+                return sup.finalize(graph_state)
+            if next_node == "end":
+                return graph_state
+            # Otherwise next_node is an explicit agent node name.
+            graph_state = getattr(sup, next_node)(graph_state)
 
 
 def build_graph(adapter: BackendAdapter, *, supervisor: SQLAgentSupervisor | None = None):
@@ -54,22 +70,37 @@ def build_graph(adapter: BackendAdapter, *, supervisor: SQLAgentSupervisor | Non
 
     builder = StateGraph(GraphExecutionState)
     builder.add_node("parse_plan", supervisor.parse_plan)
-    builder.add_node("call_next_agent", supervisor.call_next_agent)
+    builder.add_node("run_sql_agent", supervisor.run_sql_agent)
+    builder.add_node("run_eda_agent", supervisor.run_eda_agent)
+    builder.add_node("run_analysis_agent", supervisor.run_analysis_agent)
+    builder.add_node("run_visualization_agent", supervisor.run_visualization_agent)
+    builder.add_node("run_report_agent", supervisor.run_report_agent)
     builder.add_node("central_validate", supervisor.central_validate)
     builder.add_node("supervisor_gate", supervisor.supervisor_gate)
+    builder.add_node("approval_gate", supervisor.approval_gate)
     builder.add_node("finalize", supervisor.finalize)
+
     builder.add_edge(START, "parse_plan")
-    builder.add_edge("parse_plan", "call_next_agent")
-    builder.add_edge("call_next_agent", "central_validate")
+    # SQL is always the first explicit agent node after parse_plan.
+    builder.add_edge("parse_plan", "run_sql_agent")
+    # central_validate runs after every agent node.
+    for agent_node in AGENT_NODE_NAMES:
+        builder.add_edge(agent_node, "central_validate")
     builder.add_edge("central_validate", "supervisor_gate")
     builder.add_conditional_edges(
         "supervisor_gate",
         supervisor.route_after_gate,
         {
-            "call_next_agent": "call_next_agent",
+            "run_sql_agent": "run_sql_agent",
+            "run_eda_agent": "run_eda_agent",
+            "run_analysis_agent": "run_analysis_agent",
+            "run_visualization_agent": "run_visualization_agent",
+            "run_report_agent": "run_report_agent",
+            "approval_gate": "approval_gate",
             "finalize": "finalize",
             "end": END,
         },
     )
+    builder.add_edge("approval_gate", END)
     builder.add_edge("finalize", END)
     return builder.compile()
