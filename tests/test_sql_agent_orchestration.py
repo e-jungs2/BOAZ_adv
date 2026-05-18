@@ -23,6 +23,12 @@ def adapter() -> BackendAdapter:
         shutil.rmtree(base_dir, ignore_errors=True)
 
 
+def artifact_text(adapter: BackendAdapter, artifact_id: str) -> str:
+    artifact = adapter.get_artifact(artifact_id)
+    assert artifact.local_path is not None
+    return Path(artifact.local_path).read_text(encoding="utf-8")
+
+
 def run_events(adapter: BackendAdapter, run_id: str) -> list[tuple[str | None, str]]:
     return [(event.node_name, event.event_type) for event in adapter.services.run_service.list_events(run_id)]
 
@@ -70,7 +76,7 @@ def test_graph_build_returns_invokable_graph(adapter: BackendAdapter) -> None:
 
 def test_supervisor_simple_query_routes_sql_and_report_only(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("간단한 매출 요약을 보여줘")
+    state = supervisor.run("Show a simple revenue summary.")
 
     assert state.terminal_state == SupervisorTerminalState.completed
     assert state.route_kind == "simple"
@@ -87,9 +93,9 @@ def test_supervisor_simple_query_routes_sql_and_report_only(adapter: BackendAdap
     assert report_artifact.type == ArtifactType.report
 
 
-def test_supervisor_eda_query_routes_sql_eda_and_report_only(adapter: BackendAdapter) -> None:
+def test_eda_query_creates_data_profile_artifact(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("매출 데이터 프로파일과 품질 요약을 보여줘")
+    state = supervisor.run("Profile data quality and missing values, then make a report.")
 
     assert state.terminal_state == SupervisorTerminalState.completed
     assert state.route_kind == "eda"
@@ -100,10 +106,18 @@ def test_supervisor_eda_query_routes_sql_eda_and_report_only(adapter: BackendAda
     started_nodes = [node for node, event_type in run_events(adapter, state.run_id) if event_type == "agent.started"]
     assert started_nodes == ["sql_agent", "eda_agent", "report_agent"]
 
+    eda_artifact = adapter.get_artifact(state.artifact_ids["eda_agent"][0])
+    assert eda_artifact.type == ArtifactType.data_profile
+    assert eda_artifact.preview["row_count"] >= 1
+    assert eda_artifact.preview["columns"] == ["sample_value"]
+    assert eda_artifact.preview["sample_available"] is True
+    assert eda_artifact.preview["quality_status"] == "usable"
+    assert eda_artifact.preview["key_issues"] == []
 
-def test_supervisor_trend_query_routes_sql_analysis_visualization_and_report(adapter: BackendAdapter) -> None:
+
+def test_trend_query_creates_analysis_and_chart_artifacts(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("월별 매출 추이를 차트로 보여줘")
+    state = supervisor.run("Analyze monthly revenue trend with a chart.")
 
     assert state.terminal_state == SupervisorTerminalState.completed
     assert state.route_kind == "trend"
@@ -113,10 +127,36 @@ def test_supervisor_trend_query_routes_sql_analysis_visualization_and_report(ada
     started_nodes = [node for node, event_type in run_events(adapter, state.run_id) if event_type == "agent.started"]
     assert started_nodes == ["sql_agent", "analysis_agent", "visualization_agent", "report_agent"]
 
+    analysis_artifact = adapter.get_artifact(state.artifact_ids["analysis_agent"][0])
+    assert analysis_artifact.metadata["kind"] == "analysis_result"
+    assert analysis_artifact.preview["method_summary"]
+    assert analysis_artifact.preview["key_findings"]
+    assert analysis_artifact.preview["limitations"]
+
+    chart_artifact = adapter.get_artifact(state.artifact_ids["visualization_agent"][0])
+    assert chart_artifact.type == ArtifactType.chart
+    assert chart_artifact.preview["chart_type"] == "line"
+    assert chart_artifact.preview["title"]
+    assert chart_artifact.preview["encoding"]
+    assert chart_artifact.preview["data_reference"] == state.artifact_ids["sql_agent"]
+
+
+def test_report_contains_required_sections_and_evidence(adapter: BackendAdapter) -> None:
+    supervisor = SQLAgentSupervisor(adapter)
+    state = supervisor.run("Analyze monthly revenue trend with a chart.")
+
+    report_text = artifact_text(adapter, state.artifact_ids["report_agent"][0])
+
+    for heading in ("## Summary", "## Key Findings", "## Evidence", "## Visuals", "## Limitations", "## Next Actions"):
+        assert heading in report_text
+    for agent_name in ("sql_agent", "analysis_agent", "visualization_agent"):
+        for artifact_id in state.artifact_ids[agent_name]:
+            assert artifact_id in report_text
+
 
 def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("월별 매출 추이를 분석하고, 반복 조회가 필요하면 데이터마트 저장을 제안해줘.")
+    state = supervisor.run("\ubc18\ubcf5 \uc870\ud68c\uc6a9 \ub370\uc774\ud130\ub9c8\ud2b8 \uc800\uc7a5\uc744 \uc81c\uc548\ud574\uc918.")
 
     assert state.terminal_state == SupervisorTerminalState.needs_user_approval
     assert state.route_kind == "mart"
@@ -134,7 +174,7 @@ def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> N
 
 def test_approval_resume_registers_mart_metadata(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("반복 조회용 데이터마트로 저장할 후보를 만들어줘.")
+    state = supervisor.run("\ubc18\ubcf5 \uc870\ud68c\uc6a9 \ub370\uc774\ud130\ub9c8\ud2b8 \uc800\uc7a5 \ud6c4\ubcf4\ub97c \ub9cc\ub4e4\uc5b4\uc918.")
     approval_id = state.approval_ids[0]
 
     adapter.services.approval_store.resolve_approval_request(approval_id, ApprovalDecision.approve)
