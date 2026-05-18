@@ -38,6 +38,7 @@ class EDAAgent:
                 "sample_available": profile["sample_available"],
                 "quality_status": profile["quality_status"],
                 "key_issues": profile["key_issues"],
+                "recommended_next_steps": profile["recommended_next_steps"],
             },
         )
         return AgentEnvelope(

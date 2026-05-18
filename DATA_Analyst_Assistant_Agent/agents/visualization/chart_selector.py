@@ -19,15 +19,21 @@ def build_chart_config(state: OrchestrationState) -> dict:
     plan = state.plan
     x_field = plan.dimension if plan and plan.dimension else "dimension"
     y_field = plan.metric if plan and plan.metric else "metric"
+    x_type = "temporal" if chart_type == "line" else "nominal"
     return {
         "chart_type": chart_type,
         "title": _title_for(chart_type, x_field, y_field),
         "encoding": {
-            "x": {"field": x_field, "type": "temporal" if chart_type == "line" else "nominal", "label": x_field.title()},
-            "y": {"field": y_field, "type": "quantitative", "label": y_field.title()},
+            "x": {"field": x_field, "type": x_type, "label": _label_for(x_field), "unit": "unknown"},
+            "y": {"field": y_field, "type": "quantitative", "label": _label_for(y_field), "unit": "unknown"},
         },
         "data_reference": state.artifact_ids.get("sql_agent", []),
         "analysis_reference": state.artifact_ids.get("analysis_agent", []),
+        "axis": {
+            "x_label": _label_for(x_field),
+            "y_label": _label_for(y_field),
+            "unit_note": "Units are placeholders until source metadata is available.",
+        },
     }
 
 
@@ -39,3 +45,7 @@ def _title_for(chart_type: str, x_field: str, y_field: str) -> str:
     if chart_type == "histogram":
         return f"{y_field.title()} distribution"
     return "SQL result preview"
+
+
+def _label_for(field: str) -> str:
+    return field.replace("_", " ").title()

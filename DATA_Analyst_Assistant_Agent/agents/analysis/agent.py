@@ -16,7 +16,8 @@ class AnalysisAgent:
     def run(self, state: OrchestrationState, runtime: AgentRuntime) -> AgentEnvelope:
         context = runtime.context(state, node_name=self.name, tool_name="analysis_agent.result")
         parent_ids = state.artifact_ids.get("eda_agent", []) + state.artifact_ids.get("sql_agent", [])
-        result = build_analysis_result(state)
+        eda_profiles = [runtime.adapter.get_artifact(artifact_id).preview or {} for artifact_id in state.artifact_ids.get("eda_agent", [])]
+        result = build_analysis_result(state, eda_profiles=eda_profiles)
         ref = runtime.adapter.register_artifact(
             state.run_id,
             ArtifactType.file,
