@@ -1,6 +1,15 @@
 from __future__ import annotations
 
+import json
+
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
+from DATA_Analyst_Assistant_Agent.agents.sql.mart import (
+    build_mart_candidate,
+    needs_mart_candidate,
+    register_mart_candidate_artifact,
+)
+from DATA_Analyst_Assistant_Agent.agents.sql.planner import SQLPlan, build_sql_plan
+from DATA_Analyst_Assistant_Agent.agents.sql.self_check import is_sql_safe, run_sql_self_check
 from DATA_Analyst_Assistant_Agent.models import (
     AgentEnvelope,
     AgentStatus,
@@ -17,32 +26,63 @@ class SQLAgent:
 
     def run(self, state: OrchestrationState, runtime: AgentRuntime) -> AgentEnvelope:
         plan = state.plan
-        query = plan.source_sql if plan else "SELECT 1 AS sample_value"
         context = runtime.context(state, node_name=self.name, tool_name="sql_agent.preview")
 
-        preview_ref = runtime.adapter.run_sql_preview(state.run_id, query, context=context)
+        # 1. Build SQL plan
+        sql_plan = build_sql_plan(state.user_query, plan)
+
+        # 2. Pre-execution self-check
+        pre_checks = run_sql_self_check(sql_plan.generated_sql)
+        if not all(c.passed for c in pre_checks):
+            return self._failed_envelope(pre_checks, sql_plan)
+
+        # 3. Execute preview through backend
+        preview_ref = runtime.adapter.run_sql_preview(
+            state.run_id, sql_plan.generated_sql, context=context,
+        )
+
+        # 4. Post-execution self-check
+        columns = preview_ref.preview.get("columns", [])
+        row_count = int(preview_ref.preview.get("row_count", 0) or 0)
+        post_checks = run_sql_self_check(
+            sql_plan.generated_sql, columns=columns, row_count=row_count,
+        )
+
+        # 5. Register SQL plan artifact
+        plan_ref = runtime.adapter.register_artifact(
+            state.run_id,
+            "file",
+            content_text=json.dumps(sql_plan.model_dump(mode="json"), ensure_ascii=False, indent=2),
+            filename=f"sql_plan_{state.run_id}.json",
+            created_by_tool="DATA_Analyst_Assistant_Agent.sql_agent.planner",
+            context=context,
+            metadata={"kind": "sql_plan", "metric": sql_plan.metric, "dimension": sql_plan.dimension},
+            preview={"metric": sql_plan.metric, "dimension": sql_plan.dimension},
+        )
+
+        # 6. Register GE-style validation artifact
         ge_ref = runtime.adapter.register_ge_validation(
             state.run_id,
             table_name="sql_preview",
             source_ref=preview_ref,
-            passed=True,
-            row_count=int(preview_ref.preview.get("row_count", 0) or 0),
-            schema_fingerprint="preview-columns:" + ",".join(preview_ref.preview.get("columns", [])),
+            passed=all(c.passed for c in post_checks),
+            row_count=row_count,
+            schema_fingerprint="preview-columns:" + ",".join(columns),
             context=context,
         )
 
-        checks = [
-            LocalCheck(name="read_only_preview_executed", passed=True, detail="Preview was executed through backend SQLExecutor."),
-            LocalCheck(
-                name="result_shape_available",
-                passed=bool(preview_ref.preview.get("columns")),
-                severity="error" if not preview_ref.preview.get("columns") else "info",
-                detail="Preview artifact contains columns metadata.",
-            ),
-        ]
-        requires_mart_review = bool(plan and plan.requires_mart_review)
-        flags = []
-        if requires_mart_review:
+        # 7. Collect artifact refs
+        artifact_refs = [preview_ref, plan_ref, ge_ref]
+        flags: list[BusinessFlag] = []
+
+        # 8. Mart candidate handling
+        requires_mart = bool(plan and plan.requires_mart_review) or needs_mart_candidate(state.user_query)
+        if requires_mart:
+            candidate = build_mart_candidate(sql_plan, row_count=row_count, columns=columns)
+            mart_artifact_id = register_mart_candidate_artifact(
+                state, runtime, candidate, preview_ref.artifact_id,
+            )
+            state.mart_candidate_ids.append(mart_artifact_id)
             flags.append(
                 BusinessFlag(
                     code="mart_candidate",
@@ -52,16 +92,30 @@ class SQLAgent:
             )
 
         return AgentEnvelope(
-            status=AgentStatus.approval_required if requires_mart_review else AgentStatus.success,
+            status=AgentStatus.approval_required if requires_mart else AgentStatus.success,
             agent_name=self.name,
             summary="SQL preview completed.",
-            artifact_refs=[preview_ref],
-            validation=ValidationBlock(local_checks=checks, integrity_refs=[ge_ref], business_flags=flags),
+            artifact_refs=artifact_refs,
+            validation=ValidationBlock(
+                local_checks=post_checks,
+                integrity_refs=[ge_ref],
+                business_flags=flags,
+            ),
             approval=ApprovalRequirement(
-                required=requires_mart_review,
-                reason="Reusable mart persistence requires user approval." if requires_mart_review else "",
-                approval_type="mart_persistence" if requires_mart_review else "",
+                required=requires_mart,
+                reason="Reusable mart persistence requires user approval." if requires_mart else "",
+                approval_type="mart_persistence" if requires_mart else "",
             ),
             context_refs=[{"kind": "run", "ref_id": state.run_id, "summary": "current run"}],
+            next_handoff="validation_agent",
+        )
+
+    def _failed_envelope(self, checks: list[LocalCheck], sql_plan: SQLPlan) -> AgentEnvelope:
+        return AgentEnvelope(
+            status=AgentStatus.failed,
+            agent_name=self.name,
+            summary=f"SQL self-check failed: {[c.detail for c in checks if not c.passed]}",
+            validation=ValidationBlock(local_checks=checks),
+            retry_hint={"retryable": True, "suggested_action": "fix_sql", "reason_code": "self_check_failed"},
             next_handoff="validation_agent",
         )
