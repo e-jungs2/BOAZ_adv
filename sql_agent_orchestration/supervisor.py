@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Iterable
-
 from data_agent_backend.models.approvals import ApprovalStatus
 from data_agent_backend.models.runs import RunStatus
 
@@ -27,9 +25,9 @@ from sql_agent_orchestration.models import (
 class SQLAgentSupervisor:
     """Minimal LangGraph-compatible supervisor skeleton.
 
-    The class intentionally keeps the orchestration decisions explicit and testable.
-    A future LangGraph StateGraph can wrap these node methods without changing
-    specialist agent contracts.
+    This is intentionally route-driven instead of a fixed serial chain. The
+    parse_plan node chooses the required specialist agents, then the supervisor
+    gates each handoff through central validation.
     """
 
     def __init__(
@@ -51,6 +49,13 @@ class SQLAgentSupervisor:
         self.analysis_agent = analysis_agent or AnalysisAgent()
         self.visualization_agent = visualization_agent or VisualizationAgent()
         self.report_agent = report_agent or ReportAgent()
+        self.agent_registry = {
+            "sql_agent": self.sql_agent,
+            "eda_agent": self.eda_agent,
+            "analysis_agent": self.analysis_agent,
+            "visualization_agent": self.visualization_agent,
+            "report_agent": self.report_agent,
+        }
 
     def run(self, user_query: str, *, thread_id: str | None = None) -> OrchestrationState:
         run = self.adapter.create_run(thread_id=thread_id, metadata={"entrypoint": "sql_agent_supervisor"})
@@ -60,7 +65,7 @@ class SQLAgentSupervisor:
 
         try:
             self.parse_plan(state)
-            for agent in self._agent_sequence():
+            for agent in self._agent_sequence(state):
                 state.current_step = agent.name
                 self.adapter.append_run_event(state.run_id, "agent.started", f"{agent.name} started.", node_name=agent.name)
                 envelope = agent.run(state, self.runtime)
@@ -88,15 +93,77 @@ class SQLAgentSupervisor:
             return state
 
     def parse_plan(self, state: OrchestrationState) -> None:
-        query = state.user_query
-        requires_mart = any(token in query for token in ("반복", "데이터마트", "마트", "저장", "재사용"))
-        wants_trend = any(token in query for token in ("월별", "추이", "trend", "monthly"))
-        state.goal = "월별 추이 분석" if wants_trend else "SQL 기반 질의 응답"
+        normalized = state.user_query.casefold()
+        requires_mart = self._contains_any(
+            normalized,
+            "repeat",
+            "reusable",
+            "datamart",
+            "mart",
+            "save",
+            "\ubc18\ubcf5",
+            "\ub370\uc774\ud130\ub9c8\ud2b8",
+            "\ub9c8\ud2b8",
+            "\uc800\uc7a5",
+            "\uc7ac\uc0ac\uc6a9",
+        )
+        wants_trend = self._contains_any(normalized, "trend", "monthly", "\uc6d4\ubcc4", "\ucd94\uc774")
+        wants_eda = self._contains_any(
+            normalized,
+            "eda",
+            "profile",
+            "quality",
+            "missing",
+            "duplicate",
+            "outlier",
+            "distribution",
+            "\ud488\uc9c8",
+            "\uacb0\uce21",
+            "\uc911\ubcf5",
+            "\uc774\uc0c1\uce58",
+            "\ubd84\ud3ec",
+        )
+        wants_analysis = wants_trend or self._contains_any(
+            normalized,
+            "analysis",
+            "analyze",
+            "insight",
+            "hypothesis",
+            "stat",
+            "compare",
+            "\ubd84\uc11d",
+            "\uc778\uc0ac\uc774\ud2b8",
+            "\uac00\uc124",
+            "\ube44\uad50",
+        )
+        wants_visualization = wants_trend or self._contains_any(
+            normalized,
+            "chart",
+            "visual",
+            "visualization",
+            "plot",
+            "graph",
+            "\ucc28\ud2b8",
+            "\uc2dc\uac01\ud654",
+            "\uadf8\ub798\ud504",
+        )
+
+        required_agents = ["sql_agent"]
+        if wants_eda:
+            required_agents.append("eda_agent")
+        if wants_analysis:
+            required_agents.append("analysis_agent")
+        if wants_visualization:
+            required_agents.append("visualization_agent")
+        required_agents.append("report_agent")
+
+        state.goal = "monthly trend analysis" if wants_trend else "SQL-backed response"
         state.plan = AnalysisPlan(
             goal=state.goal,
-            metric="매출" if "매출" in query else None,
-            dimension="월" if wants_trend else None,
+            metric="revenue" if self._contains_any(normalized, "revenue", "sales", "\ub9e4\ucd9c") else None,
+            dimension="month" if wants_trend else None,
             requires_mart_review=requires_mart,
+            required_agents=required_agents,
             source_sql="SELECT 1 AS sample_value",
         )
         state.current_step = "parse_plan"
@@ -183,8 +250,9 @@ class SQLAgentSupervisor:
         self.adapter.append_run_event(state.run_id, "supervisor.completed", "Supervisor completed.", node_name="finalize")
         self.adapter.update_run_status(state.run_id, RunStatus.succeeded, metadata={"terminal_state": state.terminal_state.value})
 
-    def _agent_sequence(self) -> Iterable[object]:
-        return (self.sql_agent, self.eda_agent, self.analysis_agent, self.visualization_agent, self.report_agent)
+    def _agent_sequence(self, state: OrchestrationState) -> list[object]:
+        requested = state.plan.required_agents if state.plan else ["sql_agent", "report_agent"]
+        return [self.agent_registry[name] for name in requested if name in self.agent_registry]
 
     def _record_agent_result(self, state: OrchestrationState, envelope: AgentEnvelope) -> None:
         state.add_artifacts(envelope.agent_name, envelope.artifact_ids())
@@ -200,3 +268,6 @@ class SQLAgentSupervisor:
                 "approval_required": envelope.approval.required,
             },
         )
+
+    def _contains_any(self, value: str, *needles: str) -> bool:
+        return any(needle in value for needle in needles)

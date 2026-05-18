@@ -93,6 +93,7 @@ class AnalysisPlan(BaseModel):
     dimension: str | None = None
     filters: list[str] = Field(default_factory=list)
     requires_mart_review: bool = False
+    required_agents: list[str] = Field(default_factory=lambda: ["sql_agent", "report_agent"])
     source_sql: str = "SELECT 1 AS sample_value"
 
 

@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from data_agent_backend.config import BackendConfig
-from data_agent_backend.models.artifacts import ArtifactType
 from data_agent_backend.models.approvals import ApprovalDecision, ApprovalStatus
+from data_agent_backend.models.artifacts import ArtifactType
 from data_agent_backend.models.runs import RunStatus
 from sql_agent_orchestration import BackendAdapter, SQLAgentSupervisor, SupervisorTerminalState
 
@@ -57,13 +57,18 @@ def test_sql_preview_allows_select_and_blocks_write_sql(adapter: BackendAdapter)
     assert getattr(exc_info.value, "code", "") == "POLICY_BLOCKED"
 
 
-def test_supervisor_non_mart_query_completes_and_registers_report(adapter: BackendAdapter) -> None:
+def test_supervisor_simple_query_runs_sql_and_report_only(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("간단한 매출 요약을 보여줘")
+    state = supervisor.run("Show a simple revenue summary.")
 
     assert state.terminal_state == SupervisorTerminalState.completed
+    assert state.plan is not None
+    assert state.plan.required_agents == ["sql_agent", "report_agent"]
     assert "sql_agent" in state.artifact_ids
     assert "report_agent" in state.artifact_ids
+    assert "eda_agent" not in state.artifact_ids
+    assert "analysis_agent" not in state.artifact_ids
+    assert "visualization_agent" not in state.artifact_ids
 
     run = adapter.services.run_service.get_run(state.run_id)
     assert run.status == RunStatus.succeeded
@@ -74,7 +79,7 @@ def test_supervisor_non_mart_query_completes_and_registers_report(adapter: Backe
 
 def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("월별 매출 추이를 분석하고, 반복 조회가 필요하면 데이터마트 저장을 제안해줘.")
+    state = supervisor.run("Analyze monthly revenue trend and suggest reusable datamart storage.")
 
     assert state.terminal_state == SupervisorTerminalState.needs_user_approval
     assert state.approval_ids
@@ -90,7 +95,7 @@ def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> N
 
 def test_approval_resume_registers_mart_metadata(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("반복 조회용 데이터마트로 저장할 후보를 만들어줘.")
+    state = supervisor.run("Create a reusable datamart candidate for repeated lookup.")
     approval_id = state.approval_ids[0]
 
     adapter.services.approval_store.resolve_approval_request(approval_id, ApprovalDecision.approve)
@@ -101,6 +106,29 @@ def test_approval_resume_registers_mart_metadata(adapter: BackendAdapter) -> Non
 
     metadata_artifact = adapter.get_artifact(resumed.artifact_ids["mart_metadata"][0])
     assert metadata_artifact.metadata["kind"] == "mart_metadata"
+
+
+def test_supervisor_routes_only_requested_eda_agent(adapter: BackendAdapter) -> None:
+    supervisor = SQLAgentSupervisor(adapter)
+    state = supervisor.run("Profile data quality and missing values, then make a report.")
+
+    assert state.terminal_state == SupervisorTerminalState.completed
+    assert state.plan is not None
+    assert state.plan.required_agents == ["sql_agent", "eda_agent", "report_agent"]
+    assert "eda_agent" in state.artifact_ids
+    assert "analysis_agent" not in state.artifact_ids
+    assert "visualization_agent" not in state.artifact_ids
+
+
+def test_supervisor_routes_analysis_and_visualization_for_trend(adapter: BackendAdapter) -> None:
+    supervisor = SQLAgentSupervisor(adapter)
+    state = supervisor.run("Analyze monthly revenue trend with a chart.")
+
+    assert state.terminal_state == SupervisorTerminalState.completed
+    assert state.plan is not None
+    assert state.plan.required_agents == ["sql_agent", "analysis_agent", "visualization_agent", "report_agent"]
+    assert "analysis_agent" in state.artifact_ids
+    assert "visualization_agent" in state.artifact_ids
 
 
 def test_backend_non_modification_guard_paths() -> None:
