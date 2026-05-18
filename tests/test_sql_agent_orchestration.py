@@ -156,7 +156,7 @@ def test_report_contains_required_sections_and_evidence(adapter: BackendAdapter)
 
 def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("\ubc18\ubcf5 \uc870\ud68c\uc6a9 \ub370\uc774\ud130\ub9c8\ud2b8 \uc800\uc7a5\uc744 \uc81c\uc548\ud574\uc918.")
+    state = supervisor.run("반복 조회용 데이터마트 저장을 제안해줘.")
 
     assert state.terminal_state == SupervisorTerminalState.needs_user_approval
     assert state.route_kind == "mart"
@@ -174,7 +174,7 @@ def test_supervisor_mart_query_pauses_for_approval(adapter: BackendAdapter) -> N
 
 def test_approval_resume_registers_mart_metadata(adapter: BackendAdapter) -> None:
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run("\ubc18\ubcf5 \uc870\ud68c\uc6a9 \ub370\uc774\ud130\ub9c8\ud2b8 \uc800\uc7a5 \ud6c4\ubcf4\ub97c \ub9cc\ub4e4\uc5b4\uc918.")
+    state = supervisor.run("반복 조회용 데이터마트 저장 후보를 만들어줘.")
     approval_id = state.approval_ids[0]
 
     adapter.services.approval_store.resolve_approval_request(approval_id, ApprovalDecision.approve)
