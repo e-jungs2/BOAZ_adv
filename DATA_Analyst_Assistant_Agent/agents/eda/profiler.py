@@ -25,11 +25,21 @@ def profile_from_artifacts(artifacts: list[ArtifactRecord]) -> dict:
     if artifacts and row_count == 0:
         key_issues.append("SQL result preview reported zero rows.")
 
+    if not artifacts:
+        quality_status = "unavailable"
+        recommended_next_steps = ["run_sql_preview", "clarify_data_source"]
+    elif key_issues:
+        quality_status = "needs_review"
+        recommended_next_steps = ["review_preview_metadata", "rerun_or_refine_sql"]
+    else:
+        quality_status = "usable"
+        recommended_next_steps = ["continue_to_analysis", "document_limitations"]
+
     return {
         "row_count": row_count,
         "columns": columns,
         "sample_available": sample_available,
-        "quality_status": "needs_review" if key_issues else "usable",
+        "quality_status": quality_status,
         "key_issues": key_issues,
-        "recommended_next_steps": ["analysis"] if columns else ["clarify_data_source"],
+        "recommended_next_steps": recommended_next_steps,
     }
