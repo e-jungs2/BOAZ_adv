@@ -1,4 +1,4 @@
-"""B-lane tests: SQL-Agent MVP and mart candidate behavior."""
+"""B-lane tests: SQL-Agent, planner, self-check, mart candidate, and Phase 2A routing."""
 
 from __future__ import annotations
 
@@ -26,6 +26,17 @@ def adapter() -> BackendAdapter:
         yield BackendAdapter(config=config)
     finally:
         shutil.rmtree(base_dir, ignore_errors=True)
+
+
+def started_agents(adapter: BackendAdapter, run_id: str) -> list[str]:
+    return [
+        e.node_name for e in adapter.services.run_service.list_events(run_id)
+        if e.event_type == "agent.started"
+    ]
+
+
+def event_pairs(adapter: BackendAdapter, run_id: str) -> list[tuple[str | None, str]]:
+    return [(e.node_name, e.event_type) for e in adapter.services.run_service.list_events(run_id)]
 
 
 # ── self_check tests ──
@@ -89,6 +100,36 @@ class TestSQLPlanner:
         assert plan.metric == "revenue"
         assert plan.dimension == "month"
 
+    def test_trend_route_uses_cte_template(self):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        ap = AnalysisPlan(goal="trend", route_kind="trend", metric="revenue", dimension="월")
+        plan = build_sql_plan("월별 매출 추이", ap)
+        assert "monthly_data" in plan.generated_sql
+        assert "ORDER BY" in plan.generated_sql
+        assert plan.route_kind == "trend"
+
+    def test_eda_route_uses_profile_template(self):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        ap = AnalysisPlan(goal="eda", route_kind="eda")
+        plan = build_sql_plan("데이터 품질 프로파일", ap)
+        assert "column_name" in plan.generated_sql
+        assert "distinct_count" in plan.generated_sql
+        assert plan.route_kind == "eda"
+
+    def test_comprehensive_route_uses_cte_template(self):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        ap = AnalysisPlan(goal="comprehensive", route_kind="comprehensive", metric="revenue", dimension="월")
+        plan = build_sql_plan("품질 프로파일하고 월별 매출 분석", ap)
+        assert "base_data" in plan.generated_sql
+        assert plan.route_kind == "comprehensive"
+
+    def test_simple_route_metric_only(self):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        ap = AnalysisPlan(goal="simple", route_kind="simple")
+        plan = build_sql_plan("매출 요약", ap)
+        assert "revenue" in plan.generated_sql
+        assert plan.route_kind == "simple"
+
 
 # ── mart detection tests ──
 
@@ -106,74 +147,117 @@ class TestMartDetection:
         assert not needs_mart_candidate("show revenue summary")
 
 
+# ── Route detection tests (Phase 2A) ──
+
+class TestRouteDetection:
+    def test_simple_route(self, adapter):
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("간단한 매출 요약을 보여줘")
+        assert state.route_kind == "simple"
+        assert started_agents(adapter, state.run_id) == ["sql_agent", "report_agent"]
+
+    def test_eda_route(self, adapter):
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("데이터 품질 프로파일을 보여줘")
+        assert state.route_kind == "eda"
+        assert started_agents(adapter, state.run_id) == ["sql_agent", "eda_agent", "report_agent"]
+
+    def test_trend_route(self, adapter):
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("월별 매출 추이를 차트로 보여줘")
+        assert state.route_kind == "trend"
+        assert started_agents(adapter, state.run_id) == [
+            "sql_agent", "analysis_agent", "visualization_agent", "report_agent",
+        ]
+
+    def test_mart_route(self, adapter):
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("반복 조회용 데이터마트 저장을 제안해줘")
+        assert state.route_kind == "mart"
+        assert state.terminal_state == SupervisorTerminalState.needs_user_approval
+        # mart route: sql_agent only, then approval_gate
+        assert "report_agent" not in state.artifact_ids
+
+    def test_comprehensive_route(self, adapter):
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("데이터 품질 프로파일하고 월별 매출 추이도 분석해줘")
+        assert state.route_kind == "comprehensive"
+        assert state.terminal_state == SupervisorTerminalState.completed
+        assert started_agents(adapter, state.run_id) == [
+            "sql_agent", "eda_agent", "analysis_agent", "visualization_agent", "report_agent",
+        ]
+
+    def test_comprehensive_english(self, adapter):
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("Profile data quality and analyze monthly revenue trend with chart")
+        assert state.route_kind == "comprehensive"
+        assert started_agents(adapter, state.run_id) == [
+            "sql_agent", "eda_agent", "analysis_agent", "visualization_agent", "report_agent",
+        ]
+
+
 # ── SQLAgent integration tests ──
 
 class TestSQLAgentIntegration:
     def test_creates_preview_artifact(self, adapter):
-        supervisor = SQLAgentSupervisor(adapter)
-        state = supervisor.run("간단한 매출 요약을 보여줘")
-
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("간단한 매출 요약을 보여줘")
         assert "sql_agent" in state.artifact_ids
-        sql_artifacts = state.artifact_ids["sql_agent"]
-        assert len(sql_artifacts) >= 1
+        assert len(state.artifact_ids["sql_agent"]) >= 1
 
     def test_creates_ge_validation_artifact(self, adapter):
-        supervisor = SQLAgentSupervisor(adapter)
-        state = supervisor.run("간단한 매출 요약을 보여줘")
-
-        sql_artifacts = state.artifact_ids["sql_agent"]
-        has_ge = False
-        for aid in sql_artifacts:
-            art = adapter.get_artifact(aid)
-            if art.metadata.get("kind") == "ge_table_validation_json":
-                has_ge = True
-                break
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("간단한 매출 요약을 보여줘")
+        has_ge = any(
+            adapter.get_artifact(aid).metadata.get("kind") == "ge_table_validation_json"
+            for aid in state.artifact_ids["sql_agent"]
+        )
         assert has_ge, "GE validation artifact not found"
 
     def test_creates_sql_plan_artifact(self, adapter):
-        supervisor = SQLAgentSupervisor(adapter)
-        state = supervisor.run("간단한 매출 요약을 보여줘")
-
-        sql_artifacts = state.artifact_ids["sql_agent"]
-        has_plan = False
-        for aid in sql_artifacts:
-            art = adapter.get_artifact(aid)
-            if art.metadata.get("kind") == "sql_plan":
-                has_plan = True
-                break
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("간단한 매출 요약을 보여줘")
+        has_plan = any(
+            adapter.get_artifact(aid).metadata.get("kind") == "sql_plan"
+            for aid in state.artifact_ids["sql_agent"]
+        )
         assert has_plan, "SQL plan artifact not found"
 
     def test_non_mart_query_no_approval(self, adapter):
-        supervisor = SQLAgentSupervisor(adapter)
-        state = supervisor.run("간단한 매출 요약을 보여줘")
-
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("간단한 매출 요약을 보여줘")
         assert state.terminal_state == SupervisorTerminalState.completed
         assert not state.approval_ids
 
     def test_mart_query_requires_approval(self, adapter):
-        supervisor = SQLAgentSupervisor(adapter)
-        state = supervisor.run("반복 조회용 데이터마트로 저장해줘")
-
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("반복 조회용 데이터마트로 저장해줘")
         assert state.terminal_state == SupervisorTerminalState.needs_user_approval
         assert state.approval_ids
 
     def test_mart_query_creates_candidate_artifact(self, adapter):
-        supervisor = SQLAgentSupervisor(adapter)
-        state = supervisor.run("반복 조회용 데이터마트로 저장해줘")
-
-        assert state.mart_candidate_ids, "No mart candidate artifact registered"
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("반복 조회용 데이터마트로 저장해줘")
+        assert state.mart_candidate_ids
         art = adapter.get_artifact(state.mart_candidate_ids[0])
         assert art.metadata.get("kind") == "mart_candidate"
 
-    def test_approval_handled_by_supervisor_not_agent(self, adapter):
-        """SQLAgent sets approval.required but does not create approval request itself."""
-        supervisor = SQLAgentSupervisor(adapter)
-        state = supervisor.run("반복 조회용 데이터마트로 저장해줘")
-
-        # Approval request exists (created by supervisor gate)
+    def test_approval_created_by_approval_gate_not_sql_agent(self, adapter):
+        """Approval request is created in approval_gate, not in SQL-Agent."""
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("반복 조회용 데이터마트로 저장해줘")
         assert state.approval_ids
-        # But mart is NOT materialized yet
+        # approval event must come from approval_gate node
+        pairs = event_pairs(adapter, state.run_id)
+        approval_nodes = [node for node, etype in pairs if etype == "approval.required"]
+        assert approval_nodes == ["approval_gate"]
+        assert state.mart_id is None  # no mart materialized yet
+
+    def test_no_mart_metadata_before_approval(self, adapter):
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("반복 조회용 데이터마트로 저장해줘")
         assert state.mart_id is None
+        assert "mart_metadata" not in state.artifact_ids
 
     def test_backend_not_modified(self):
         changed = [
@@ -183,6 +267,7 @@ class TestSQLAgentIntegration:
             "DATA_Analyst_Assistant_Agent/agents/sql/mart.py",
             "DATA_Analyst_Assistant_Agent/mart/metadata.py",
             "DATA_Analyst_Assistant_Agent/mart/persistence.py",
+            "DATA_Analyst_Assistant_Agent/supervisor.py",
             "tests/test_sql_agent.py",
         ]
         assert not any(p.startswith("data_agent_backend/") for p in changed)

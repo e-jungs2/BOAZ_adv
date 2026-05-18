@@ -107,11 +107,21 @@ class SQLAgentSupervisor:
         wants_eda = any(token in query_lower for token in ("eda", "profile", "profiling", "quality")) or any(
             token in query for token in ("프로파일", "품질", "컬럼", "결측")
         )
+        wants_analysis = any(token in query_lower for token in ("analysis", "analyze", "insight")) or any(
+            token in query for token in ("분석", "인사이트")
+        )
 
         if requires_mart:
             route_kind = "mart"
             goal = "재사용 가능한 마트 후보 검토"
             remaining_agents = [self.sql_agent.name]
+        elif (wants_eda and wants_trend) or (wants_eda and wants_analysis):
+            route_kind = "comprehensive"
+            goal = "종합 데이터 분석 (프로파일 + 분석 + 시각화)"
+            remaining_agents = [
+                self.sql_agent.name, self.eda_agent.name, self.analysis_agent.name,
+                self.visualization_agent.name, self.report_agent.name,
+            ]
         elif wants_trend:
             route_kind = "trend"
             goal = "월별 추이 분석"

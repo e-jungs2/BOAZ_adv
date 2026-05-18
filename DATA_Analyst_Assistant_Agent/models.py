@@ -93,7 +93,7 @@ class AnalysisPlan(BaseModel):
     dimension: str | None = None
     filters: list[str] = Field(default_factory=list)
     requires_mart_review: bool = False
-    route_kind: Literal["simple", "eda", "trend", "mart"] = "simple"
+    route_kind: Literal["simple", "eda", "trend", "mart", "comprehensive"] = "simple"
     source_sql: str = "SELECT 1 AS sample_value"
 
 
