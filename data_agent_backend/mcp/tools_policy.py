@@ -12,8 +12,16 @@ def policy_evaluate(
     resource: str,
     payload: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
-    services: BackendServices | None = None,
 ) -> ToolResult:
-    services = services or get_services()
-    return result_wrap(lambda: services.policy_engine.evaluate(action, resource, payload or {}, context_from(context, "policy_evaluate")))
+    return policy_evaluate_impl(action=action, resource=resource, payload=payload, context=context, services=get_services())
 
+
+def policy_evaluate_impl(
+    *,
+    action: str,
+    resource: str,
+    payload: dict[str, Any] | None = None,
+    context: dict[str, Any] | None = None,
+    services: BackendServices,
+) -> ToolResult:
+    return result_wrap(lambda: services.policy_engine.evaluate(action, resource, payload or {}, context_from(context, "policy_evaluate")))

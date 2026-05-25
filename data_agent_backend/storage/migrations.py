@@ -156,4 +156,134 @@ MIGRATIONS: list[tuple[int, str]] = [
         );
         """,
     ),
+    (
+        3,
+        """
+        CREATE TABLE IF NOT EXISTS datasources (
+            datasource_id TEXT PRIMARY KEY,
+            name TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            database TEXT NOT NULL,
+            username TEXT NOT NULL,
+            secret_ref TEXT NOT NULL,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE IF NOT EXISTS datasource_catalog_columns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            datasource_id TEXT NOT NULL,
+            schema_name TEXT,
+            table_name TEXT NOT NULL,
+            column_name TEXT NOT NULL,
+            data_type TEXT NOT NULL,
+            nullable INTEGER NOT NULL,
+            ordinal_position INTEGER,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            refreshed_at TEXT NOT NULL,
+            FOREIGN KEY(datasource_id) REFERENCES datasources(datasource_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_datasource_catalog_columns_source_table
+            ON datasource_catalog_columns(datasource_id, table_name);
+        """,
+    ),
+    (
+        4,
+        """
+        CREATE TABLE IF NOT EXISTS datasource_table_profiles (
+            datasource_id TEXT NOT NULL,
+            schema_name TEXT,
+            table_name TEXT NOT NULL,
+            row_count INTEGER,
+            table_type TEXT NOT NULL DEFAULT 'unknown',
+            description TEXT,
+            primary_date_column TEXT,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (datasource_id, table_name),
+            FOREIGN KEY(datasource_id) REFERENCES datasources(datasource_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS datasource_column_profiles (
+            datasource_id TEXT NOT NULL,
+            schema_name TEXT,
+            table_name TEXT NOT NULL,
+            column_name TEXT NOT NULL,
+            semantic_type TEXT,
+            description TEXT,
+            null_ratio REAL,
+            distinct_count INTEGER,
+            sample_values_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (datasource_id, table_name, column_name),
+            FOREIGN KEY(datasource_id) REFERENCES datasources(datasource_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS semantic_metrics (
+            datasource_id TEXT NOT NULL,
+            name TEXT NOT NULL,
+            description TEXT,
+            expression TEXT NOT NULL,
+            recommended_table TEXT,
+            filters_json TEXT NOT NULL DEFAULT '[]',
+            dimensions_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (datasource_id, name),
+            FOREIGN KEY(datasource_id) REFERENCES datasources(datasource_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS semantic_terms (
+            datasource_id TEXT NOT NULL,
+            term TEXT NOT NULL,
+            description TEXT,
+            related_tables_json TEXT NOT NULL DEFAULT '[]',
+            related_columns_json TEXT NOT NULL DEFAULT '[]',
+            related_metrics_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (datasource_id, term),
+            FOREIGN KEY(datasource_id) REFERENCES datasources(datasource_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS semantic_marts (
+            datasource_id TEXT NOT NULL,
+            table_name TEXT NOT NULL,
+            description TEXT,
+            grain TEXT,
+            date_column TEXT,
+            priority INTEGER NOT NULL DEFAULT 0,
+            related_metrics_json TEXT NOT NULL DEFAULT '[]',
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (datasource_id, table_name),
+            FOREIGN KEY(datasource_id) REFERENCES datasources(datasource_id)
+        );
+
+        CREATE TABLE IF NOT EXISTS semantic_join_paths (
+            datasource_id TEXT NOT NULL,
+            left_table TEXT NOT NULL,
+            right_table TEXT NOT NULL,
+            join_condition TEXT NOT NULL,
+            relationship_type TEXT,
+            confidence REAL NOT NULL DEFAULT 0,
+            metadata_json TEXT NOT NULL DEFAULT '{}',
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (datasource_id, left_table, right_table, join_condition),
+            FOREIGN KEY(datasource_id) REFERENCES datasources(datasource_id)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_table_profiles_datasource
+            ON datasource_table_profiles(datasource_id);
+        CREATE INDEX IF NOT EXISTS idx_column_profiles_datasource_table
+            ON datasource_column_profiles(datasource_id, table_name);
+        CREATE INDEX IF NOT EXISTS idx_semantic_marts_datasource_priority
+            ON semantic_marts(datasource_id, priority);
+        """,
+    ),
 ]

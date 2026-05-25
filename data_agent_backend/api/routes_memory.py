@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from data_agent_backend.api.common import ContextPayload, dump_result
-from data_agent_backend.mcp.tools_memory import memory_get, memory_list, memory_propose, memory_search
+from data_agent_backend.mcp.tools_memory import memory_get_impl, memory_list_impl, memory_propose_impl, memory_search_impl
 from data_agent_backend.models.common import BackendModel
 from data_agent_backend.services.factory import BackendServices
 
@@ -45,7 +45,7 @@ class MemorySearchRequest(BackendModel):
 @router.post("/propose")
 def propose_memory(payload: MemoryProposeRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
     return dump_result(
-        memory_propose(
+        memory_propose_impl(
             namespace=payload.namespace,
             type=payload.type,
             content=payload.content,
@@ -59,15 +59,14 @@ def propose_memory(payload: MemoryProposeRequest, services: BackendServices = De
 
 @router.post("/list")
 def list_memory(payload: MemoryListRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(memory_list(namespace=payload.namespace, type=payload.type, context=payload.context, services=services))
+    return dump_result(memory_list_impl(namespace=payload.namespace, type=payload.type, context=payload.context, services=services))
 
 
 @router.post("/get")
 def get_memory(payload: MemoryGetRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(memory_get(memory_id=payload.memory_id, context=payload.context, services=services))
+    return dump_result(memory_get_impl(memory_id=payload.memory_id, context=payload.context, services=services))
 
 
 @router.post("/search")
 def search_memory(payload: MemorySearchRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(memory_search(namespace=payload.namespace, query=payload.query, type=payload.type, context=payload.context, services=services))
-
+    return dump_result(memory_search_impl(namespace=payload.namespace, query=payload.query, type=payload.type, context=payload.context, services=services))

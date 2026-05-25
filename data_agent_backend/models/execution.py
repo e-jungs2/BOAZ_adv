@@ -16,7 +16,7 @@ class ExecutionStatus(StrEnum):
 
 
 class ExecutionLimits(BackendModel):
-    timeout_ms: int = 30_000
+    timeout_ms: int | None = None
     row_limit: int | None = None
     memory_mb: int | None = None
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from data_agent_backend.api.common import ContextPayload, dump_result
-from data_agent_backend.mcp.tools_exports import export_create
+from data_agent_backend.mcp.tools_exports import export_create_impl
 from data_agent_backend.models.common import BackendModel
 from data_agent_backend.services.factory import BackendServices
 
@@ -23,7 +23,7 @@ class ExportCreateRequest(BackendModel):
 @router.post("/create")
 def create_export(payload: ExportCreateRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
     return dump_result(
-        export_create(
+        export_create_impl(
             artifact_id=payload.artifact_id,
             format=payload.format,
             destination=payload.destination,
@@ -31,4 +31,3 @@ def create_export(payload: ExportCreateRequest, services: BackendServices = Depe
             services=services,
         )
     )
-

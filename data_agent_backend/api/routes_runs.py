@@ -5,7 +5,15 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from data_agent_backend.api.common import ContextPayload, dump_result
-from data_agent_backend.mcp.tools_runs import run_append_event, run_create, run_get, run_list, run_list_events, run_summary, run_update_status
+from data_agent_backend.mcp.tools_runs import (
+    run_append_event_impl,
+    run_create_impl,
+    run_get_impl,
+    run_list_events_impl,
+    run_list_impl,
+    run_summary_impl,
+    run_update_status_impl,
+)
 from data_agent_backend.models.common import BackendModel
 from data_agent_backend.services.factory import BackendServices
 
@@ -58,7 +66,7 @@ class RunAppendEventRequest(BackendModel):
 @router.post("/create")
 def create_run(payload: RunCreateRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
     return dump_result(
-        run_create(
+        run_create_impl(
             run_id=payload.run_id,
             thread_id=payload.thread_id,
             project_id=payload.project_id,
@@ -71,13 +79,13 @@ def create_run(payload: RunCreateRequest, services: BackendServices = Depends(ge
 
 @router.post("/get")
 def get_run(payload: RunGetRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(run_get(run_id=payload.run_id, context=payload.context, services=services))
+    return dump_result(run_get_impl(run_id=payload.run_id, context=payload.context, services=services))
 
 
 @router.post("/list")
 def list_runs(payload: RunListRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
     return dump_result(
-        run_list(
+        run_list_impl(
             thread_id=payload.thread_id,
             project_id=payload.project_id,
             status=payload.status,
@@ -90,7 +98,7 @@ def list_runs(payload: RunListRequest, services: BackendServices = Depends(get_b
 @router.post("/update-status")
 def update_run_status(payload: RunUpdateStatusRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
     return dump_result(
-        run_update_status(
+        run_update_status_impl(
             run_id=payload.run_id,
             status=payload.status,
             metadata=payload.metadata,
@@ -103,7 +111,7 @@ def update_run_status(payload: RunUpdateStatusRequest, services: BackendServices
 @router.post("/events/append")
 def append_run_event(payload: RunAppendEventRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
     return dump_result(
-        run_append_event(
+        run_append_event_impl(
             run_id=payload.run_id,
             event_type=payload.event_type,
             message=payload.message,
@@ -121,9 +129,9 @@ def append_run_event(payload: RunAppendEventRequest, services: BackendServices =
 
 @router.post("/events/list")
 def list_run_events(payload: RunGetRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(run_list_events(run_id=payload.run_id, context=payload.context, services=services))
+    return dump_result(run_list_events_impl(run_id=payload.run_id, context=payload.context, services=services))
 
 
 @router.post("/summary")
 def summarize_run(payload: RunGetRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(run_summary(run_id=payload.run_id, context=payload.context, services=services))
+    return dump_result(run_summary_impl(run_id=payload.run_id, context=payload.context, services=services))
