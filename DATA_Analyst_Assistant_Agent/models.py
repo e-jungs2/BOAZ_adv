@@ -89,15 +89,15 @@ class AgentEnvelope(BaseModel):
 
 class AnalysisPlan(BaseModel):
     goal: str
+    datasource_id: str | None = None
+    catalog_summary: dict[str, Any] | None = None
+    retry_context: dict[str, Any] | None = None
+    planner_mode: Literal["llm", "deterministic"] = "deterministic"
     metric: str | None = None
     dimension: str | None = None
     filters: list[str] = Field(default_factory=list)
     requires_mart_review: bool = False
     route_kind: Literal["simple", "eda", "trend", "mart", "comprehensive"] = "simple"
-    datasource_id: str | None = None
-    catalog_summary: dict[str, Any] | None = None
-    retry_context: dict[str, Any] | None = None
-    planner_mode: Literal["llm", "deterministic"] = "deterministic"
     generated_sql: str = "SELECT 1 AS sample_value"
     source_sql: str = "SELECT 1 AS sample_value"
 
@@ -105,11 +105,12 @@ class AnalysisPlan(BaseModel):
 class OrchestrationState(BaseModel):
     run_id: str
     thread_id: str | None = None
+    datasource_id: str | None = None
+    catalog_summary: dict[str, Any] | None = None
     user_query: str
     goal: str = ""
     plan: AnalysisPlan | None = None
-    datasource_id: str | None = None
-    catalog_summary: dict[str, Any] | None = None
+    retry_context: dict[str, Any] | None = None
     current_step: str = "created"
     artifact_ids: dict[str, list[str]] = Field(default_factory=dict)
     mart_candidate_ids: list[str] = Field(default_factory=list)

@@ -1,0 +1,7 @@
+pydantic
+pandas
+duckdb
+sqlglot
+pymysql
+fastapi
+pytest

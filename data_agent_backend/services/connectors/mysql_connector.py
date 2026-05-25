@@ -4,7 +4,10 @@ import csv
 import io
 from typing import Any
 
-import pymysql
+try:
+    import pymysql
+except ModuleNotFoundError:  # pragma: no cover - depends on optional runtime package
+    pymysql = None
 
 from data_agent_backend.models.common import BackendError, utc_now_iso
 from data_agent_backend.models.datasource import (
@@ -23,6 +26,12 @@ class MySQLConnector:
         self._password = password
 
     def _connect(self) -> pymysql.Connection:
+        if pymysql is None:
+            raise BackendError(
+                "DEPENDENCY_MISSING",
+                "pymysql is required for MySQL datasource connections.",
+                {"package": "pymysql"},
+            )
         return pymysql.connect(
             host=self._record.host,
             port=self._record.port,
