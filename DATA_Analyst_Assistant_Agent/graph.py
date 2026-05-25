@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, TypedDict
+from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
 from DATA_Analyst_Assistant_Agent.backend_adapter import BackendAdapter
 from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, OrchestrationState
@@ -20,9 +20,9 @@ except Exception:  # pragma: no cover - import-safe fallback
 
 class GraphExecutionState(TypedDict):
     state: OrchestrationState
-    last_agent_result: AgentEnvelope | None
-    last_validation_result: AgentEnvelope | None
-    gate_result: str | None
+    last_agent_result: Optional[AgentEnvelope]
+    last_validation_result: Optional[AgentEnvelope]
+    gate_result: Optional[str]
 
 
 AGENT_NODE_NAMES = (

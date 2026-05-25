@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from enum import StrEnum
+from data_agent_backend.models.common import StrEnum
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field

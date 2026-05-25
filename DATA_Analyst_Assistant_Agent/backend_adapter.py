@@ -106,10 +106,37 @@ class BackendAdapter:
         run_id: str,
         query: str,
         *,
+        datasource_id: str | None = None,
         row_limit: int | None = None,
         context: PolicyContext | None = None,
     ) -> ArtifactRef:
+        if datasource_id and self.services.datasource_service:
+            return self._run_via_datasource(run_id, query, datasource_id, row_limit, context)
         return self.services.sql_executor.run_sql_query(query, run_id, context=context, row_limit=row_limit)
+
+    def _run_via_datasource(
+        self, run_id: str, query: str, datasource_id: str, row_limit: int | None, context: PolicyContext | None,
+    ) -> ArtifactRef:
+        context = context or PolicyContext(run_id=run_id)
+        row_limit = row_limit or self.services.config.default_sql_row_limit
+        validation = self.services.sql_executor.validate_sql(query, row_limit)
+        if validation.get("blocked"):
+            from data_agent_backend.models.common import BackendError
+            raise BackendError("POLICY_BLOCKED", validation["reason"])
+
+        query_ref = self.register_artifact(
+            run_id, "sql_query", content_text=query, filename="query.sql",
+            created_by_tool="sql_agent.preview", context=context,
+            metadata={"datasource_id": datasource_id, "row_limit": row_limit},
+        )
+        rows, columns, csv_text = self.services.datasource_service.query_datasource(datasource_id, query, row_limit)
+        return self.register_artifact(
+            run_id, "sql_result", content_text=csv_text, filename="result.csv",
+            created_by_tool="sql_agent.preview", context=context,
+            parent_ids=[query_ref.artifact_id], lineage_edge_type="query_result_of",
+            metadata={"datasource_id": datasource_id, "row_limit": row_limit, "returned_rows": len(rows)},
+            preview={"row_count": len(rows), "columns": columns, "sample_rows": [dict(zip(columns, r)) for r in rows[:5]]},
+        )
 
     def check_policy(
         self,
@@ -246,6 +273,26 @@ class BackendAdapter:
             metadata={"kind": "mart_metadata", "mart_id": mart_id, "approval_id": approval_id},
             preview={"mart_id": mart_id, "refresh_policy": refresh_policy},
         )
+
+    # ── Datasource orchestration methods ──
+
+    def get_default_datasource_id(self) -> str | None:
+        if self.services.datasource_service:
+            return self.services.datasource_service.get_default_id()
+        return None
+
+    def get_catalog_summary(self, datasource_id: str) -> dict | None:
+        if not self.services.datasource_service:
+            return None
+        cat = self.services.datasource_service.get_catalog_summary(datasource_id)
+        return cat.model_dump(mode="json") if cat else None
+
+    def refresh_catalog(self, datasource_id: str) -> dict:
+        cat = self.services.datasource_service.refresh_catalog(datasource_id)
+        return cat.model_dump(mode="json")
+
+    def read_artifact_text(self, artifact_id: str) -> str:
+        return self.services.artifact_store.read_text(artifact_id)
 
     @property
     def base_data_dir(self) -> Path:

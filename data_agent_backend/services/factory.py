@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.services.approval_store import ApprovalStore
@@ -13,6 +14,7 @@ from data_agent_backend.services.memory_store import MemoryStore
 from data_agent_backend.services.policy_engine import PolicyEngine
 from data_agent_backend.services.run_service import RunService
 from data_agent_backend.services.sandbox_executor import DisabledSandboxExecutor, DockerSandboxExecutor, SandboxExecutor
+from data_agent_backend.services.datasource_service import DatasourceService
 from data_agent_backend.services.sql_executor import SQLExecutor
 from data_agent_backend.services.workspace_backend import WorkspaceBackend
 from data_agent_backend.services.workspace_router import ArtifactMount, LocalDirectoryMount, MemoryMount, ReadOnlyPolicyMount, WorkspaceRouter
@@ -37,6 +39,7 @@ class BackendServices:
     export_service: ExportService
     checkpoint_manager: CheckpointManager
     run_service: RunService
+    datasource_service: DatasourceService = field(default=None)  # type: ignore[assignment]
 
 
 def create_backend_services(config: BackendConfig | None = None) -> BackendServices:
@@ -67,6 +70,9 @@ def create_backend_services(config: BackendConfig | None = None) -> BackendServi
     export_service = ExportService(config.exports_dir, sqlite, artifact_registry, artifact_store, policy_engine, approval_store)
     checkpoint_manager = CheckpointManager(sqlite)
     run_service = RunService(sqlite, policy_engine, artifact_registry)
+    datasource_service = DatasourceService(sqlite)
+    _auto_register_default_datasource(datasource_service)
+
     return BackendServices(
         config=config,
         sqlite=sqlite,
@@ -83,4 +89,27 @@ def create_backend_services(config: BackendConfig | None = None) -> BackendServi
         export_service=export_service,
         checkpoint_manager=checkpoint_manager,
         run_service=run_service,
+        datasource_service=datasource_service,
     )
+
+
+def _auto_register_default_datasource(ds_service: DatasourceService) -> None:
+    """If MYSQL_* env vars are all set, register/reuse a default MySQL datasource."""
+    host = os.environ.get("MYSQL_HOST")
+    database = os.environ.get("MYSQL_DATABASE")
+    username = os.environ.get("MYSQL_USERNAME")
+    if not (host and database and username):
+        return
+
+    from data_agent_backend.models.datasource import DatasourceCreateRequest, DatasourceType
+
+    req = DatasourceCreateRequest(
+        name=os.environ.get("MYSQL_DATASOURCE_NAME", "default_mysql"),
+        type=DatasourceType.mysql,
+        host=host,
+        port=int(os.environ.get("MYSQL_PORT", "3306")),
+        database=database,
+        username=username,
+        password=os.environ.get("MYSQL_PASSWORD", ""),
+    )
+    ds_service.register(req)

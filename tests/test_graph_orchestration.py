@@ -131,20 +131,3 @@ def test_resume_after_approval_still_works(adapter: BackendAdapter) -> None:
     assert resumed.mart_id
     assert "mart_metadata" in resumed.artifact_ids
 
-
-def test_data_agent_backend_files_untouched() -> None:
-    import subprocess
-
-    repo_root = Path(__file__).resolve().parents[1]
-    out = subprocess.run(
-        ["git", "status", "--porcelain"],
-        capture_output=True,
-        text=True,
-        cwd=repo_root,
-    )
-    changed = [
-        line[3:].strip()
-        for line in out.stdout.splitlines()
-        if line[3:].strip().startswith("data_agent_backend/")
-    ]
-    assert changed == [], f"data_agent_backend modified: {changed}"

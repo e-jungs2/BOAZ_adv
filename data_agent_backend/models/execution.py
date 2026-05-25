@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from enum import StrEnum
-
 from .artifacts import ArtifactRef
-from .common import BackendModel
+from .common import BackendModel, StrEnum
 
 
 class ExecutionStatus(StrEnum):
