@@ -61,11 +61,29 @@ class SQLAgentSupervisor:
 
             self.graph = build_graph(adapter, supervisor=self)
 
-    def run(self, user_query: str, *, thread_id: str | None = None) -> OrchestrationState:
+    def run(
+        self,
+        user_query: str,
+        *,
+        thread_id: str | None = None,
+        datasource_id: str | None = None,
+    ) -> OrchestrationState:
         run = self.adapter.create_run(thread_id=thread_id, metadata={"entrypoint": "sql_agent_supervisor"})
-        state = OrchestrationState(run_id=run.run_id, thread_id=thread_id, user_query=user_query)
+        resolved_datasource_id = datasource_id or self.adapter.get_default_datasource_id()
+        state = OrchestrationState(
+            run_id=run.run_id,
+            thread_id=thread_id,
+            user_query=user_query,
+            datasource_id=resolved_datasource_id,
+        )
         self.adapter.update_run_status(state.run_id, RunStatus.running)
-        self.adapter.append_run_event(state.run_id, "supervisor.started", "Supervisor started.", node_name="start")
+        self.adapter.append_run_event(
+            state.run_id,
+            "supervisor.started",
+            "Supervisor started.",
+            node_name="start",
+            metadata={"datasource_id": resolved_datasource_id},
+        )
 
         try:
             graph = self.graph
@@ -138,12 +156,22 @@ class SQLAgentSupervisor:
         state.goal = goal
         state.route_kind = route_kind
         state.remaining_agents = remaining_agents
+        catalog_summary = self._resolve_catalog_summary(state.datasource_id)
+        planner_mode = "llm" if state.datasource_id and catalog_summary else "deterministic"
+        retry_context = self._retry_context_from_state(state)
+        state.catalog_summary = catalog_summary
+        state.planner_mode = planner_mode
         state.plan = AnalysisPlan(
             goal=goal,
             metric="매출" if "매출" in query else None,
             dimension="월" if wants_trend else None,
             requires_mart_review=requires_mart,
             route_kind=route_kind,
+            datasource_id=state.datasource_id,
+            catalog_summary=catalog_summary,
+            retry_context=retry_context,
+            planner_mode=planner_mode,
+            generated_sql="SELECT 1 AS sample_value",
             source_sql="SELECT 1 AS sample_value",
         )
         state.current_step = "parse_plan"
@@ -163,6 +191,34 @@ class SQLAgentSupervisor:
             "last_agent_result": None,
             "last_validation_result": None,
             "gate_result": None,
+        }
+
+    def _resolve_catalog_summary(self, datasource_id: str | None) -> dict[str, Any] | None:
+        if not datasource_id:
+            return None
+        summary = self.adapter.get_catalog_summary(datasource_id)
+        if self._catalog_is_empty(summary):
+            summary = self.adapter.refresh_catalog(datasource_id)
+        return summary
+
+    @staticmethod
+    def _catalog_is_empty(summary: dict[str, Any] | None) -> bool:
+        if not summary:
+            return True
+        return not bool(summary.get("tables"))
+
+    @staticmethod
+    def _retry_context_from_state(state: OrchestrationState) -> dict[str, Any] | None:
+        if not state.error_state:
+            return None
+        if not any(key in state.error_state for key in ("code", "message", "query", "datasource_id")):
+            return None
+        return {
+            "code": state.error_state.get("code") or state.error_state.get("type") or "unknown_error",
+            "message": state.error_state.get("message", ""),
+            "query": state.error_state.get("query", ""),
+            "datasource_id": state.error_state.get("datasource_id") or state.datasource_id,
+            "step": state.error_state.get("step", state.current_step),
         }
 
     # ── explicit agent nodes ──────────────────────────────────────────────

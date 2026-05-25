@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import json
+from typing import Any
+
+from data_agent_backend.models.common import BackendError
 
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
 from DATA_Analyst_Assistant_Agent.agents.sql.mart import (
@@ -9,7 +12,7 @@ from DATA_Analyst_Assistant_Agent.agents.sql.mart import (
     register_mart_candidate_artifact,
 )
 from DATA_Analyst_Assistant_Agent.agents.sql.planner import SQLPlan, build_sql_plan
-from DATA_Analyst_Assistant_Agent.agents.sql.self_check import is_sql_safe, run_sql_self_check
+from DATA_Analyst_Assistant_Agent.agents.sql.self_check import run_sql_self_check
 from DATA_Analyst_Assistant_Agent.models import (
     AgentEnvelope,
     AgentStatus,
@@ -30,6 +33,11 @@ class SQLAgent:
 
         # 1. Build SQL plan
         sql_plan = build_sql_plan(state.user_query, plan)
+        state.generated_sql = sql_plan.generated_sql
+        state.planner_mode = str(sql_plan.planner_mode)
+        if plan is not None:
+            plan.generated_sql = sql_plan.generated_sql
+            plan.planner_mode = "llm" if sql_plan.planner_mode == "llm" else "deterministic"
 
         # 2. Pre-execution self-check
         pre_checks = run_sql_self_check(sql_plan.generated_sql)
@@ -37,9 +45,35 @@ class SQLAgent:
             return self._failed_envelope(pre_checks, sql_plan)
 
         # 3. Execute preview through backend
-        preview_ref = runtime.adapter.run_sql_preview(
-            state.run_id, sql_plan.generated_sql, context=context,
-        )
+        try:
+            preview_ref = runtime.adapter.run_sql_preview(
+                state.run_id,
+                sql_plan.generated_sql,
+                datasource_id=state.datasource_id,
+                context=context,
+            )
+        except Exception as exc:
+            error_payload = self._build_retry_error_payload(state, sql_plan.generated_sql, exc)
+            state.error_state = error_payload
+            if plan is not None:
+                plan.retry_context = error_payload
+            return AgentEnvelope(
+                status=AgentStatus.failed,
+                agent_name=self.name,
+                summary=f"SQL preview failed: {error_payload['message']}",
+                validation=ValidationBlock(
+                    local_checks=[
+                        LocalCheck(
+                            name="preview_execution",
+                            passed=False,
+                            severity="error",
+                            detail=error_payload["message"],
+                        )
+                    ]
+                ),
+                retry_hint={"retryable": True, "suggested_action": "fix_sql", "reason_code": error_payload["code"]},
+                next_handoff="validation_agent",
+            )
 
         # 4. Post-execution self-check
         columns = preview_ref.preview.get("columns", [])
@@ -56,8 +90,13 @@ class SQLAgent:
             filename=f"sql_plan_{state.run_id}.json",
             created_by_tool="DATA_Analyst_Assistant_Agent.sql_agent.planner",
             context=context,
-            metadata={"kind": "sql_plan", "metric": sql_plan.metric, "dimension": sql_plan.dimension},
-            preview={"metric": sql_plan.metric, "dimension": sql_plan.dimension},
+            metadata={
+                "kind": "sql_plan",
+                "metric": sql_plan.metric,
+                "dimension": sql_plan.dimension,
+                "planner_mode": sql_plan.planner_mode,
+            },
+            preview={"metric": sql_plan.metric, "dimension": sql_plan.dimension, "planner_mode": sql_plan.planner_mode},
         )
 
         # 6. Register GE-style validation artifact
@@ -119,3 +158,19 @@ class SQLAgent:
             retry_hint={"retryable": True, "suggested_action": "fix_sql", "reason_code": "self_check_failed"},
             next_handoff="validation_agent",
         )
+
+    @staticmethod
+    def _build_retry_error_payload(state: OrchestrationState, query: str, exc: Exception) -> dict[str, Any]:
+        if isinstance(exc, BackendError):
+            code = exc.code
+            message = exc.message
+        else:
+            code = type(exc).__name__
+            message = str(exc)
+        return {
+            "code": code or "preview_execution_failed",
+            "message": message or "SQL preview failed.",
+            "query": query,
+            "datasource_id": state.datasource_id,
+            "step": state.current_step or "sql_agent",
+        }

@@ -21,7 +21,7 @@ from data_agent_backend.models.datasource import (
 from data_agent_backend.services.datasource_service import DatasourceService
 from data_agent_backend.services.factory import create_backend_services, _auto_register_default_datasource
 from data_agent_backend.storage.sqlite import SQLiteStore
-from DATA_Analyst_Assistant_Agent import BackendAdapter
+from DATA_Analyst_Assistant_Agent import BackendAdapter, SQLAgentSupervisor
 
 
 # ── fixtures ──
@@ -198,6 +198,31 @@ class TestBackendAdapterDatasource:
                 run.run_id, "INSERT INTO orders VALUES (1)",
                 datasource_id=rec.datasource_id,
             )
+
+    def test_supervisor_run_uses_explicit_datasource_id(self, adapter, monkeypatch):
+        ds = adapter.services.datasource_service
+        rec = ds.register(_make_request())
+        monkeypatch.setattr(adapter, "get_catalog_summary", lambda datasource_id: {"tables": {"orders": {"columns": {}}}})
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("간단한 매출 요약을 보여줘", datasource_id=rec.datasource_id)
+        assert state.datasource_id == rec.datasource_id
+        assert state.plan is not None
+        assert state.plan.datasource_id == rec.datasource_id
+
+    def test_supervisor_refreshes_empty_catalog_before_planning(self, adapter, monkeypatch):
+        ds = adapter.services.datasource_service
+        rec = ds.register(_make_request())
+        refreshed = {"datasource_id": rec.datasource_id, "database": "sql_agent", "tables": {"orders": {"columns": {}}}}
+        get_catalog = MagicMock(return_value=None)
+        refresh_catalog = MagicMock(return_value=refreshed)
+        monkeypatch.setattr(adapter, "get_catalog_summary", get_catalog)
+        monkeypatch.setattr(adapter, "refresh_catalog", refresh_catalog)
+        sup = SQLAgentSupervisor(adapter)
+        state = sup.run("간단한 매출 요약을 보여줘", datasource_id=rec.datasource_id)
+        refresh_catalog.assert_called_once_with(rec.datasource_id)
+        assert state.catalog_summary == refreshed
+        assert state.plan is not None
+        assert state.plan.catalog_summary == refreshed
 
 
 # ── MySQL live tests (skipped if MySQL unavailable) ──

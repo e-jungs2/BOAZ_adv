@@ -5,12 +5,15 @@ from __future__ import annotations
 import shutil
 import uuid
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.artifacts import ArtifactType
+from data_agent_backend.models.common import BackendError
 from DATA_Analyst_Assistant_Agent.agents.sql.self_check import is_sql_safe, run_sql_self_check
+from DATA_Analyst_Assistant_Agent.agents.sql import planner as planner_module
 from DATA_Analyst_Assistant_Agent.agents.sql.planner import build_sql_plan, SQLPlan
 from DATA_Analyst_Assistant_Agent.agents.sql.mart import needs_mart_candidate
 from DATA_Analyst_Assistant_Agent import BackendAdapter, SQLAgentSupervisor, SupervisorTerminalState
@@ -130,6 +133,61 @@ class TestSQLPlanner:
         assert "revenue" in plan.generated_sql
         assert plan.route_kind == "simple"
 
+    def test_llm_prompt_includes_catalog_and_previous_error(self):
+        prompt = planner_module._build_llm_system_prompt(
+            catalog_summary={
+                "database": "db",
+                "tables": {
+                    "orders": {
+                        "columns": {
+                            "order_date": {"type": "DATE", "nullable": False, "description": "secret"},
+                            "amount": {"type": "DECIMAL", "nullable": True},
+                        }
+                    }
+                },
+                "password": "should_not_leak",
+            },
+            retry_context={"code": "BAD_SQL", "message": "unknown column", "query": "SELECT bad", "datasource_id": "ds1"},
+        )
+        assert "<MYSQL_CATALOG_JSON>" in prompt
+        assert '"orders"' in prompt
+        assert '"order_date"' in prompt
+        assert "should_not_leak" not in prompt
+        assert "<PREVIOUS_ERROR>" in prompt
+        assert "unknown column" in prompt
+
+    def test_llm_json_response_converts_to_sql_plan(self):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+
+        ap = AnalysisPlan(goal="simple", route_kind="simple", planner_mode="llm")
+        raw = """
+        {
+          "selected_tables": ["orders"],
+          "selected_columns": ["order_date", "amount"],
+          "generated_sql": "SELECT order_date, amount FROM orders",
+          "reasoning": "answers the question",
+          "confidence": 0.85
+        }
+        """
+        plan = planner_module._parse_llm_sql_plan(raw, ap)
+        assert plan.planner_mode == "llm"
+        assert plan.selected_tables == ["orders"]
+        assert plan.generated_sql == "SELECT order_date, amount FROM orders"
+        assert plan.confidence == pytest.approx(0.85)
+
+    def test_malformed_llm_json_falls_back_to_deterministic(self, monkeypatch):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+
+        monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
+        monkeypatch.setattr(planner_module, "_call_llm_planner", lambda **kwargs: "{bad json")
+        ap = AnalysisPlan(goal="simple", route_kind="simple", planner_mode="llm")
+        plan = build_sql_plan("매출 요약", ap)
+        assert plan.planner_mode == "deterministic"
+        assert "revenue" in plan.generated_sql
+
+    def test_llm_forbidden_sql_is_still_blocked(self):
+        assert not is_sql_safe("DROP TABLE orders")
+
 
 # ── mart detection tests ──
 
@@ -199,6 +257,25 @@ class TestRouteDetection:
 # ── SQLAgent integration tests ──
 
 class TestSQLAgentIntegration:
+    def test_supervisor_parse_plan_transfers_retry_context(self, adapter):
+        from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+
+        sup = SQLAgentSupervisor(adapter)
+        state = OrchestrationState(run_id=adapter.create_run().run_id, user_query="간단한 매출 요약을 보여줘")
+        state.error_state = {
+            "code": "BAD_SQL",
+            "message": "unknown column amountt",
+            "query": "SELECT amountt FROM orders",
+            "datasource_id": "ds_retry",
+            "step": "sql_agent",
+        }
+        reparsed = sup.parse_plan(
+            {"state": state, "last_agent_result": None, "last_validation_result": None, "gate_result": None}
+        )["state"]
+        assert reparsed.plan is not None
+        assert reparsed.plan.retry_context is not None
+        assert reparsed.plan.retry_context["message"] == "unknown column amountt"
+
     def test_creates_preview_artifact(self, adapter):
         sup = SQLAgentSupervisor(adapter)
         state = sup.run("간단한 매출 요약을 보여줘")
@@ -258,6 +335,30 @@ class TestSQLAgentIntegration:
         state = sup.run("반복 조회용 데이터마트로 저장해줘")
         assert state.mart_id is None
         assert "mart_metadata" not in state.artifact_ids
+
+    def test_sql_preview_failure_records_retry_context(self, adapter, monkeypatch):
+        from DATA_Analyst_Assistant_Agent.agents.sql.agent import SQLAgent
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan, OrchestrationState
+
+        monkeypatch.setattr(
+            adapter,
+            "run_sql_preview",
+            MagicMock(side_effect=BackendError("BAD_SQL", "Unknown column 'amountt'")),
+        )
+        state = OrchestrationState(
+            run_id=adapter.create_run().run_id,
+            user_query="매출 요약",
+            current_step="sql_agent",
+            datasource_id="ds_retry",
+            plan=AnalysisPlan(goal="simple", route_kind="simple"),
+        )
+        envelope = SQLAgent().run(state, SQLAgentSupervisor(adapter).runtime)
+        assert envelope.status.value == "failed"
+        assert state.error_state["code"] == "BAD_SQL"
+        assert state.error_state["datasource_id"] == "ds_retry"
+        assert "SELECT" in state.error_state["query"]
+        assert state.plan is not None
+        assert state.plan.retry_context is not None
 
     def test_backend_not_modified(self):
         changed = [

@@ -94,6 +94,11 @@ class AnalysisPlan(BaseModel):
     filters: list[str] = Field(default_factory=list)
     requires_mart_review: bool = False
     route_kind: Literal["simple", "eda", "trend", "mart", "comprehensive"] = "simple"
+    datasource_id: str | None = None
+    catalog_summary: dict[str, Any] | None = None
+    retry_context: dict[str, Any] | None = None
+    planner_mode: Literal["llm", "deterministic"] = "deterministic"
+    generated_sql: str = "SELECT 1 AS sample_value"
     source_sql: str = "SELECT 1 AS sample_value"
 
 
@@ -103,6 +108,8 @@ class OrchestrationState(BaseModel):
     user_query: str
     goal: str = ""
     plan: AnalysisPlan | None = None
+    datasource_id: str | None = None
+    catalog_summary: dict[str, Any] | None = None
     current_step: str = "created"
     artifact_ids: dict[str, list[str]] = Field(default_factory=dict)
     mart_candidate_ids: list[str] = Field(default_factory=list)
@@ -115,6 +122,8 @@ class OrchestrationState(BaseModel):
     completed_agents: list[str] = Field(default_factory=list)
     last_agent: str | None = None
     route_kind: str = "simple"
+    planner_mode: Literal["llm", "deterministic"] = "deterministic"
+    generated_sql: str = ""
 
     def add_artifacts(self, key: str, artifact_ids: list[str]) -> None:
         if not artifact_ids:

@@ -6,6 +6,11 @@ Structured so real schema/catalog lookup or LLM-based generation can be inserted
 
 from __future__ import annotations
 
+import json
+import os
+from typing import Any
+from urllib import error, request
+
 from pydantic import BaseModel, Field
 
 from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
@@ -21,6 +26,8 @@ class SQLPlan(BaseModel):
     generated_sql: str = "SELECT 1 AS sample_value"
     reasoning: str = ""
     route_kind: str = "simple"
+    planner_mode: str = "deterministic"
+    confidence: float | None = None
 
 
 def _detect_metric(query: str) -> str | None:
@@ -42,6 +49,16 @@ def _detect_dimension(query: str) -> str | None:
 
 
 def build_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None = None) -> SQLPlan:
+    """Build a SQL plan from the user query and optional analysis plan."""
+    requested_mode = analysis_plan.planner_mode if analysis_plan else "deterministic"
+    if requested_mode == "llm":
+        llm_plan = _try_build_llm_sql_plan(user_query, analysis_plan)
+        if llm_plan is not None:
+            return llm_plan
+    return _build_deterministic_sql_plan(user_query, analysis_plan)
+
+
+def _build_deterministic_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None = None) -> SQLPlan:
     """Build a deterministic SQL plan from the user query and optional analysis plan."""
     metric = _detect_metric(user_query)
     dimension = _detect_dimension(user_query)
@@ -64,7 +81,138 @@ def build_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None = None) -
         generated_sql=sql,
         reasoning=_build_reasoning(route_kind, metric, dimension),
         route_kind=route_kind,
+        planner_mode="deterministic",
     )
+
+
+def _try_build_llm_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None) -> SQLPlan | None:
+    api_key = os.getenv("GOOGLE_API_KEY")
+    if not api_key or analysis_plan is None:
+        return None
+    prompt = _build_llm_system_prompt(
+        catalog_summary=analysis_plan.catalog_summary,
+        retry_context=analysis_plan.retry_context,
+    )
+    try:
+        raw_text = _call_llm_planner(api_key=api_key, system_prompt=prompt, user_query=user_query)
+        return _parse_llm_sql_plan(raw_text, analysis_plan)
+    except (ValueError, OSError, error.URLError):
+        return None
+
+
+def _build_llm_system_prompt(
+    *,
+    catalog_summary: dict[str, Any] | None,
+    retry_context: dict[str, Any] | None,
+) -> str:
+    catalog_json = json.dumps(_sanitize_catalog_summary(catalog_summary), ensure_ascii=False, indent=2)
+    retry_json = json.dumps(_coerce_retry_context(retry_context), ensure_ascii=False, indent=2)
+    return (
+        "You generate safe analytical SQL for MySQL.\n"
+        "Allowed output: exactly one SELECT statement or one WITH statement.\n"
+        "Forbidden: INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, CALL, and any multi statement SQL.\n"
+        "Do not use DuckDB-specific or SQLite-specific functions or syntax.\n"
+        "Return JSON only.\n"
+        "<MYSQL_CATALOG_JSON>\n"
+        f"{catalog_json}\n"
+        "</MYSQL_CATALOG_JSON>\n"
+        "<PREVIOUS_ERROR>\n"
+        f"{retry_json}\n"
+        "</PREVIOUS_ERROR>"
+    )
+
+
+def _sanitize_catalog_summary(catalog_summary: dict[str, Any] | None) -> dict[str, Any]:
+    if not catalog_summary:
+        return {"tables": {}}
+    tables = catalog_summary.get("tables", {})
+    sanitized_tables: dict[str, Any] = {}
+    for table_name, table_info in tables.items():
+        columns = (table_info or {}).get("columns", {})
+        sanitized_tables[table_name] = {
+            "columns": {
+                column_name: {
+                    "type": (column_info or {}).get("type", ""),
+                    "nullable": bool((column_info or {}).get("nullable", True)),
+                }
+                for column_name, column_info in columns.items()
+            }
+        }
+    return {"tables": sanitized_tables}
+
+
+def _coerce_retry_context(retry_context: dict[str, Any] | None) -> dict[str, Any]:
+    if not retry_context:
+        return {"message": ""}
+    return {
+        "code": retry_context.get("code", ""),
+        "message": retry_context.get("message", ""),
+        "query": retry_context.get("query", ""),
+        "datasource_id": retry_context.get("datasource_id", ""),
+        "step": retry_context.get("step", ""),
+        "hint": retry_context.get("hint", ""),
+    }
+
+
+def _call_llm_planner(*, api_key: str, system_prompt: str, user_query: str) -> str:
+    model_name = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
+    endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
+    payload = {
+        "system_instruction": {"parts": [{"text": system_prompt}]},
+        "contents": [{"parts": [{"text": user_query}]}],
+        "generationConfig": {"responseMimeType": "application/json", "temperature": 0.1},
+    }
+    req = request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json", "x-goog-api-key": api_key},
+        method="POST",
+    )
+    with request.urlopen(req, timeout=20) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    return _extract_llm_response_text(body)
+
+
+def _extract_llm_response_text(body: dict[str, Any]) -> str:
+    candidates = body.get("candidates") or []
+    if not candidates:
+        raise ValueError("LLM response missing candidates.")
+    content = (candidates[0] or {}).get("content") or {}
+    parts = content.get("parts") or []
+    text = "".join(part.get("text", "") for part in parts if isinstance(part, dict))
+    if not text.strip():
+        raise ValueError("LLM response missing text payload.")
+    return text
+
+
+def _parse_llm_sql_plan(raw_text: str, analysis_plan: AnalysisPlan) -> SQLPlan:
+    payload = json.loads(raw_text)
+    if not isinstance(payload, dict):
+        raise ValueError("LLM planner payload must be a JSON object.")
+    generated_sql = payload.get("generated_sql")
+    if not isinstance(generated_sql, str) or not generated_sql.strip():
+        raise ValueError("LLM planner payload missing generated_sql.")
+    return SQLPlan(
+        selected_tables=[str(x) for x in payload.get("selected_tables", [])],
+        selected_columns=[str(x) for x in payload.get("selected_columns", [])],
+        metric=analysis_plan.metric,
+        dimension=analysis_plan.dimension,
+        filters=list(analysis_plan.filters),
+        generated_sql=generated_sql.strip(),
+        reasoning=str(payload.get("reasoning") or "LLM plan selected SQL from catalog-aware prompt."),
+        route_kind=analysis_plan.route_kind,
+        planner_mode="llm",
+        confidence=_coerce_confidence(payload.get("confidence")),
+    )
+
+
+def _coerce_confidence(value: Any) -> float | None:
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
 
 
 # ── Route-aware SQL templates ──
