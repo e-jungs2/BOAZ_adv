@@ -1,0 +1,42 @@
+[project]
+name = "data-agent-backend"
+version = "0.1.0"
+description = "LangGraph 기반 데이터 분석 에이전트 프레임워크를 위한 백엔드 및 MCP 기반입니다."
+requires-python = ">=3.11"
+dependencies = [
+    "deepagents>=0.2.0",
+    "duckdb>=1.1.0",
+    "fastapi>=0.115.0",
+    "langchain-mcp-adapters>=0.1.0",
+    "langchain-openai>=0.3.0",
+    "mcp>=1.2.0",
+    "pymysql>=1.1.0",
+    "pydantic>=2.8.0",
+    "python-dotenv>=1.0.0",
+    "sqlalchemy>=2.0.0",
+    "sqlglot>=25.0.0",
+    "uvicorn>=0.30.0",
+]
+
+[project.optional-dependencies]
+analysis = [
+    "matplotlib>=3.8.0",
+    "pandas>=2.2.0",
+    "seaborn>=0.13.0",
+]
+dev = [
+    "httpx>=0.27.0",
+    "pytest>=8.0.0",
+]
+
+[project.scripts]
+data-agent-api = "data_agent_backend.api.app:main"
+data-agent-mcp = "data_agent_backend.mcp.server:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

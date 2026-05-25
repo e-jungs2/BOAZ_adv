@@ -1,23 +1,17 @@
-# Python-generated files
+.venv/
+.uv-cache/
+.pytest_cache/
+.pytest_tmp_codex/
 __pycache__/
-*.py[oc]
+*.py[cod]
+.env
+.data_agent/
+.playwright-mcp/
+.worktrees/
+
+# Python build/test outputs
 build/
 dist/
-wheels/
-*.egg-info
-
-# Virtual environments
-.venv
-
-# Environment variables files 
-.env
-
-# Logs and databases 
-*.log
-*.db
-*.sqlite3
-*.json
-.data_agent/
-gx/uncommitted/
-
-.DS_Store
+*.egg-info/
+.coverage
+htmlcov/
