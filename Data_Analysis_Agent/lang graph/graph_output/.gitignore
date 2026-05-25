@@ -1,0 +1,17 @@
+.venv/
+.uv-cache/
+.pytest_cache/
+.pytest_tmp_codex/
+__pycache__/
+*.py[cod]
+.env
+.data_agent/
+.playwright-mcp/
+.worktrees/
+
+# Python build/test outputs
+build/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
