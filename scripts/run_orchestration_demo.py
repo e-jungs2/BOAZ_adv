@@ -2,7 +2,12 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from DATA_Analyst_Assistant_Agent import BackendAdapter, SQLAgentSupervisor
 
@@ -21,14 +26,18 @@ def _artifact_preview(adapter: BackendAdapter, artifact_id: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run DATA_Analyst_Assistant_Agent orchestration demo.")
-    parser.add_argument("query", help="User question to run through the orchestration graph.")
+    parser.add_argument("query", nargs="?", help="User question to run through the orchestration graph.")
     parser.add_argument("--thread-id", default="demo-thread", help="Optional thread id for the backend run.")
     parser.add_argument("--datasource-id", default=None, help="Optional backend datasource id.")
     args = parser.parse_args()
 
+    query = args.query or input("질문 입력: ").strip()
+    if not query:
+        raise SystemExit("질문이 비어 있어서 종료합니다.")
+
     adapter = BackendAdapter()
     supervisor = SQLAgentSupervisor(adapter)
-    state = supervisor.run(args.query, thread_id=args.thread_id, datasource_id=args.datasource_id)
+    state = supervisor.run(query, thread_id=args.thread_id, datasource_id=args.datasource_id)
 
     print("\n=== Orchestration Result ===")
     print(f"terminal_state: {state.terminal_state}")
