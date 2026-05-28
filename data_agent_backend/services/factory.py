@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass, field
 
+from dotenv import find_dotenv, load_dotenv
+
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.services.approval_store import ApprovalStore
 from data_agent_backend.services.artifact_registry import ArtifactRegistry
@@ -43,6 +45,8 @@ class BackendServices:
 
 
 def create_backend_services(config: BackendConfig | None = None) -> BackendServices:
+    # Load a local .env if present, while preserving explicit process env vars.
+    load_dotenv(find_dotenv(usecwd=True), override=False)
     config = config or BackendConfig()
     config.ensure_dirs()
     sqlite = SQLiteStore(config.db_path)

@@ -110,6 +110,40 @@ class TestDatasourceRegistration:
 # ── Auto-register from env ──
 
 class TestAutoRegister:
+    def test_create_backend_services_loads_env_file(self, tmp_dir, monkeypatch):
+        env_path = tmp_dir / ".env"
+        env_path.write_text(
+            "\n".join(
+                [
+                    "MYSQL_HOST=localhost",
+                    "MYSQL_PORT=3306",
+                    "MYSQL_DATABASE=sql_agent",
+                    "MYSQL_USERNAME=root",
+                    "MYSQL_PASSWORD=1234",
+                    "MYSQL_DATASOURCE_NAME=env_mysql",
+                ]
+            ),
+            encoding="utf-8",
+        )
+        for key in (
+            "MYSQL_HOST",
+            "MYSQL_PORT",
+            "MYSQL_DATABASE",
+            "MYSQL_USERNAME",
+            "MYSQL_PASSWORD",
+            "MYSQL_DATASOURCE_NAME",
+        ):
+            monkeypatch.delenv(key, raising=False)
+        monkeypatch.chdir(tmp_dir)
+
+        with patch.dict(os.environ, {}, clear=False):
+            services = create_backend_services(BackendConfig(base_data_dir=tmp_dir / ".data_agent"))
+
+            records = services.datasource_service.list_all()
+            assert len(records) == 1
+            assert records[0].name == "env_mysql"
+            assert records[0].database == "sql_agent"
+
     def test_env_values_trigger_registration(self, sqlite):
         ds_service = DatasourceService(sqlite)
         env = {

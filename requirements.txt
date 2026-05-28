@@ -3,5 +3,6 @@ pandas
 duckdb
 sqlglot
 pymysql
+python-dotenv
 fastapi
 pytest
