@@ -7,6 +7,7 @@ from typing import Any
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.approvals import ApprovalRequest
 from data_agent_backend.models.artifacts import ArtifactRecord, ArtifactRef, ArtifactRegisterRequest, ArtifactType
+from data_agent_backend.models.common import to_jsonable
 from data_agent_backend.models.contexts import PolicyContext
 from data_agent_backend.models.policy import PolicyDecision
 from data_agent_backend.models.runs import RunEvent, RunRecord, RunStatus
@@ -135,7 +136,13 @@ class BackendAdapter:
             created_by_tool="sql_agent.preview", context=context,
             parent_ids=[query_ref.artifact_id], lineage_edge_type="query_result_of",
             metadata={"datasource_id": datasource_id, "row_limit": row_limit, "returned_rows": len(rows)},
-            preview={"row_count": len(rows), "columns": columns, "sample_rows": [dict(zip(columns, r)) for r in rows[:5]]},
+            preview=to_jsonable(
+                {
+                    "row_count": len(rows),
+                    "columns": columns,
+                    "sample_rows": [dict(zip(columns, r)) for r in rows[:5]],
+                }
+            ),
         )
 
     def check_policy(

@@ -93,6 +93,7 @@ class AnalysisPlan(BaseModel):
     catalog_summary: dict[str, Any] | None = None
     retry_context: dict[str, Any] | None = None
     planner_mode: Literal["llm", "deterministic"] = "deterministic"
+    require_llm_planner: bool = False
     metric: str | None = None
     dimension: str | None = None
     filters: list[str] = Field(default_factory=list)
@@ -106,6 +107,8 @@ class OrchestrationState(BaseModel):
     run_id: str
     thread_id: str | None = None
     datasource_id: str | None = None
+    requested_planner_mode: Literal["llm", "deterministic"] | None = None
+    require_llm_planner: bool = False
     catalog_summary: dict[str, Any] | None = None
     user_query: str
     goal: str = ""

@@ -22,6 +22,9 @@ wheels/
 .pytest_cache/
 .pytest_tmp/
 .test_data/
+.demo_data/
+.demo_data_cli_check/
+.demo_data_cli_check2/
 gx/uncommitted/
 
 .DS_Store

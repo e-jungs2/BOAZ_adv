@@ -175,6 +175,33 @@ class TestSQLPlanner:
         assert plan.generated_sql == "SELECT order_date, amount FROM orders"
         assert plan.confidence == pytest.approx(0.85)
 
+    def test_llm_json_response_accepts_sql_query_alias(self):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+
+        ap = AnalysisPlan(goal="simple", route_kind="simple", planner_mode="llm")
+        raw = """
+        {
+          "selected_tables": ["orders"],
+          "selected_columns": ["order_date", "amount"],
+          "sql_query": "SELECT order_date, amount FROM orders",
+          "reasoning": "answers the question"
+        }
+        """
+        plan = planner_module._parse_llm_sql_plan(raw, ap)
+        assert plan.generated_sql == "SELECT order_date, amount FROM orders"
+
+    def test_llm_json_response_accepts_query_alias(self):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+
+        ap = AnalysisPlan(goal="simple", route_kind="simple", planner_mode="llm")
+        raw = """
+        {
+          "query": "SELECT order_date, amount FROM orders"
+        }
+        """
+        plan = planner_module._parse_llm_sql_plan(raw, ap)
+        assert plan.generated_sql == "SELECT order_date, amount FROM orders"
+
     def test_malformed_llm_json_falls_back_to_deterministic(self, monkeypatch):
         from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
 
@@ -184,6 +211,15 @@ class TestSQLPlanner:
         plan = build_sql_plan("매출 요약", ap)
         assert plan.planner_mode == "deterministic"
         assert "revenue" in plan.generated_sql
+
+    def test_strict_llm_mode_raises_when_unavailable(self, monkeypatch):
+        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+
+        monkeypatch.delenv("GOOGLE_API_KEY", raising=False)
+        ap = AnalysisPlan(goal="simple", route_kind="simple", planner_mode="llm", require_llm_planner=True)
+
+        with pytest.raises(planner_module.LLMPlannerUnavailableError):
+            build_sql_plan("매출 요약", ap)
 
     def test_llm_forbidden_sql_is_still_blocked(self):
         assert not is_sql_safe("DROP TABLE orders")

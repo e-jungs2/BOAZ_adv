@@ -94,6 +94,53 @@ Expected result:
 - SQL, analysis, visualization, validation, and report artifacts are registered
 - backend writes go through `BackendAdapter`
 
+## Full Demo Entrypoint
+
+Run the end-to-end demo entrypoint:
+
+```bash
+python3 -m DATA_Analyst_Assistant_Agent.demo
+```
+
+Default behavior:
+
+- prompts for one user question and runs the matching pipeline
+- uses `llm` planner mode by default
+- prints concise progress plus the final report path when a report is generated
+- hides raw LLM responses unless explicitly requested
+- fails loudly if `llm` planner is requested but unavailable, instead of silently falling back
+
+Required for `llm` planner mode:
+
+- `GOOGLE_API_KEY`
+- optional `GOOGLE_MODEL` (default: `gemini-2.5-flash`)
+
+Useful options:
+
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --query "Analyze monthly revenue trend with a chart."`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --scenario all`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --scenario mart --pause-on-approval`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --planner-mode deterministic`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --allow-planner-fallback`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --verbose`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --show-llm-raw`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --no-stream`
+- `python3 -m DATA_Analyst_Assistant_Agent.demo --scenario trend --datasource-id <your_datasource_id>`
+
+## Check MySQL Connection
+
+If you configured MySQL in `.env`, run:
+
+```bash
+python3 scripts/check_mysql.py
+```
+
+Expected result:
+
+- `catalog: OK`
+- `query: OK`
+- final line `status: SUCCESS`
+
 ## Development Rules
 
 - Do not modify `data_agent_backend/` for orchestration work.
@@ -102,4 +149,3 @@ Expected result:
 - All specialist agents must return `AgentEnvelope`.
 - Store large outputs as backend artifacts, not in graph state.
 - Mart persistence must pass through approval flow before durable registration.
-

@@ -23,6 +23,7 @@ from DATA_Analyst_Assistant_Agent.models import (
     OrchestrationState,
     SupervisorTerminalState,
 )
+from DATA_Analyst_Assistant_Agent.tracing import emit_trace
 
 
 class SQLAgentSupervisor:
@@ -67,6 +68,8 @@ class SQLAgentSupervisor:
         *,
         thread_id: str | None = None,
         datasource_id: str | None = None,
+        planner_mode: str | None = None,
+        require_llm_planner: bool = False,
     ) -> OrchestrationState:
         run = self.adapter.create_run(thread_id=thread_id, metadata={"entrypoint": "sql_agent_supervisor"})
         resolved_datasource_id = datasource_id or self.adapter.get_default_datasource_id()
@@ -75,6 +78,8 @@ class SQLAgentSupervisor:
             thread_id=thread_id,
             user_query=user_query,
             datasource_id=resolved_datasource_id,
+            requested_planner_mode=planner_mode if planner_mode in {"llm", "deterministic"} else None,
+            require_llm_planner=require_llm_planner,
         )
         self.adapter.update_run_status(state.run_id, RunStatus.running)
         self.adapter.append_run_event(
@@ -83,6 +88,16 @@ class SQLAgentSupervisor:
             "Supervisor started.",
             node_name="start",
             metadata={"datasource_id": resolved_datasource_id},
+        )
+        emit_trace(
+            "supervisor.run_started",
+            "Supervisor run started.",
+            {
+                "run_id": state.run_id,
+                "datasource_id": resolved_datasource_id,
+                "requested_planner_mode": state.requested_planner_mode,
+                "require_llm_planner": state.require_llm_planner,
+            },
         )
 
         try:
@@ -157,7 +172,7 @@ class SQLAgentSupervisor:
         state.route_kind = route_kind
         state.remaining_agents = remaining_agents
         catalog_summary = self._resolve_catalog_summary(state.datasource_id)
-        planner_mode = "llm" if state.datasource_id and catalog_summary else "deterministic"
+        planner_mode = state.requested_planner_mode or ("llm" if state.datasource_id and catalog_summary else "deterministic")
         retry_context = self._retry_context_from_state(state)
         state.catalog_summary = catalog_summary
         state.planner_mode = planner_mode
@@ -171,6 +186,7 @@ class SQLAgentSupervisor:
             catalog_summary=catalog_summary,
             retry_context=retry_context,
             planner_mode=planner_mode,
+            require_llm_planner=state.require_llm_planner,
             generated_sql="SELECT 1 AS sample_value",
             source_sql="SELECT 1 AS sample_value",
         )
@@ -182,6 +198,16 @@ class SQLAgentSupervisor:
             node_name="parse_plan",
             metadata={
                 **state.plan.model_dump(mode="json"),
+                "remaining_agents": list(state.remaining_agents),
+            },
+        )
+        emit_trace(
+            "supervisor.plan_created",
+            "Execution plan created.",
+            {
+                "route_kind": route_kind,
+                "goal": goal,
+                "planner_mode": planner_mode,
                 "remaining_agents": list(state.remaining_agents),
             },
         )
@@ -237,6 +263,11 @@ class SQLAgentSupervisor:
             state.remaining_agents.remove(agent_name)
         state.current_step = agent.name
         self.adapter.append_run_event(state.run_id, "agent.started", f"{agent.name} started.", node_name=agent.name)
+        emit_trace(
+            "supervisor.agent_started",
+            f"Dispatching {agent.name}.",
+            {"remaining_agents": list(state.remaining_agents), "completed_agents": list(state.completed_agents)},
+        )
         envelope = agent.run(state, self.runtime)
         self._record_agent_result(state, envelope)
         state.last_agent = envelope.agent_name
@@ -278,6 +309,11 @@ class SQLAgentSupervisor:
         validation = self.validation_agent.run(state, self.runtime, upstream)
         state.validation_status = validation.status.value
         self._record_agent_result(state, validation)
+        emit_trace(
+            "supervisor.validation_completed",
+            "Central validation completed.",
+            {"status": validation.status.value, "summary": validation.summary},
+        )
         return {**graph_state, "state": state, "last_validation_result": validation}
 
     def supervisor_gate(self, graph_state: dict[str, Any]) -> dict[str, Any]:
@@ -304,8 +340,10 @@ class SQLAgentSupervisor:
         # created downstream in ``approval_gate`` so this gate stays a pure
         # routing decision.
         if upstream.approval.required or validation.approval.required:
+            emit_trace("supervisor.gate", "Approval required.", {"upstream_agent": upstream.agent_name})
             return {**graph_state, "state": state, "gate_result": "needs_approval"}
 
+        emit_trace("supervisor.gate", "Continuing to next node.", {"upstream_agent": upstream.agent_name})
         return {**graph_state, "state": state, "gate_result": "continue"}
 
     def approval_gate(self, graph_state: dict[str, Any]) -> dict[str, Any]:
@@ -340,6 +378,11 @@ class SQLAgentSupervisor:
             RunStatus.waiting_approval,
             metadata={"terminal_state": state.terminal_state.value, "approval_id": approval.approval_id},
         )
+        emit_trace(
+            "supervisor.approval_gate",
+            "Approval request created.",
+            {"approval_id": approval.approval_id, "run_id": state.run_id},
+        )
         return {**graph_state, "state": state, "gate_result": "needs_user_approval"}
 
     def route_after_gate(self, graph_state: dict[str, Any]) -> str:
@@ -360,6 +403,7 @@ class SQLAgentSupervisor:
         state.terminal_state = SupervisorTerminalState.completed
         self.adapter.append_run_event(state.run_id, "supervisor.completed", "Supervisor completed.", node_name="finalize")
         self.adapter.update_run_status(state.run_id, RunStatus.succeeded, metadata={"terminal_state": state.terminal_state.value})
+        emit_trace("supervisor.finalize", "Run completed.", {"run_id": state.run_id})
         return {**graph_state, "state": state}
 
     def resume_after_approval(self, state: OrchestrationState, approval_id: str) -> OrchestrationState:
@@ -380,6 +424,25 @@ class SQLAgentSupervisor:
         )
         state.mart_id = f"mart_{state.run_id}"
         state.add_artifacts("mart_metadata", [mart_ref.artifact_id])
+        state.current_step = "finalize"
+        state.terminal_state = SupervisorTerminalState.completed
+        self.adapter.append_run_event(
+            state.run_id,
+            "supervisor.completed",
+            "Supervisor completed after approval resume.",
+            node_name="finalize",
+            artifact_ids=[mart_ref.artifact_id],
+        )
+        self.adapter.update_run_status(
+            state.run_id,
+            RunStatus.succeeded,
+            metadata={"terminal_state": state.terminal_state.value, "approval_id": approval_id},
+        )
+        emit_trace(
+            "supervisor.resume_after_approval",
+            "Approval accepted and mart metadata materialized.",
+            {"approval_id": approval_id, "mart_id": state.mart_id, "artifact_id": mart_ref.artifact_id},
+        )
         return state
 
     def _agent_sequence(self) -> Iterable[object]:

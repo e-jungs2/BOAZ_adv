@@ -11,9 +11,10 @@ import os
 from typing import Any
 from urllib import error, request
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+from DATA_Analyst_Assistant_Agent.tracing import emit_llm_raw, emit_trace
 
 
 class SQLPlan(BaseModel):
@@ -28,6 +29,25 @@ class SQLPlan(BaseModel):
     route_kind: str = "simple"
     planner_mode: str = "deterministic"
     confidence: float | None = None
+
+
+class LLMPlannerPayload(BaseModel):
+    """Validated payload expected back from the planner LLM."""
+
+    model_config = ConfigDict(extra="ignore")
+
+    selected_tables: list[str] = Field(default_factory=list)
+    selected_columns: list[str] = Field(default_factory=list)
+    generated_sql: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("generated_sql", "sql_query", "query"),
+    )
+    reasoning: str = ""
+    confidence: float | None = None
+
+
+class LLMPlannerUnavailableError(RuntimeError):
+    """Raised when llm planner mode is explicitly requested but cannot run."""
 
 
 def _detect_metric(query: str) -> str | None:
@@ -52,9 +72,11 @@ def build_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None = None) -
     """Build a SQL plan from the user query and optional analysis plan."""
     requested_mode = analysis_plan.planner_mode if analysis_plan else "deterministic"
     if requested_mode == "llm":
-        llm_plan = _try_build_llm_sql_plan(user_query, analysis_plan)
-        if llm_plan is not None:
-            return llm_plan
+        try:
+            return _try_build_llm_sql_plan(user_query, analysis_plan)
+        except LLMPlannerUnavailableError:
+            if analysis_plan and analysis_plan.require_llm_planner:
+                raise
     return _build_deterministic_sql_plan(user_query, analysis_plan)
 
 
@@ -85,19 +107,32 @@ def _build_deterministic_sql_plan(user_query: str, analysis_plan: AnalysisPlan |
     )
 
 
-def _try_build_llm_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None) -> SQLPlan | None:
+def _try_build_llm_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None) -> SQLPlan:
     api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key or analysis_plan is None:
-        return None
+    if analysis_plan is None:
+        raise LLMPlannerUnavailableError("LLM planner requested without analysis plan context.")
+    if not api_key:
+        raise LLMPlannerUnavailableError("LLM planner requested but GOOGLE_API_KEY is not set.")
     prompt = _build_llm_system_prompt(
         catalog_summary=analysis_plan.catalog_summary,
         retry_context=analysis_plan.retry_context,
     )
+    emit_trace(
+        "planner.llm_request",
+        "Sending query to LLM planner.",
+        {
+            "route_kind": analysis_plan.route_kind,
+            "planner_mode": analysis_plan.planner_mode,
+            "has_catalog": bool(analysis_plan.catalog_summary),
+            "user_query": user_query,
+        },
+    )
     try:
         raw_text = _call_llm_planner(api_key=api_key, system_prompt=prompt, user_query=user_query)
+        emit_llm_raw(raw_text)
         return _parse_llm_sql_plan(raw_text, analysis_plan)
-    except (ValueError, OSError, error.URLError):
-        return None
+    except (ValueError, OSError, error.URLError) as exc:
+        raise LLMPlannerUnavailableError(f"LLM planner call failed: {exc}") from exc
 
 
 def _build_llm_system_prompt(
@@ -112,7 +147,13 @@ def _build_llm_system_prompt(
         "Allowed output: exactly one SELECT statement or one WITH statement.\n"
         "Forbidden: INSERT, UPDATE, DELETE, DROP, ALTER, CREATE, CALL, and any multi statement SQL.\n"
         "Do not use DuckDB-specific or SQLite-specific functions or syntax.\n"
-        "Return JSON only.\n"
+        "Return exactly one JSON object with these keys:\n"
+        "- generated_sql: string, required\n"
+        "- selected_tables: string[], optional\n"
+        "- selected_columns: string[], optional\n"
+        "- reasoning: string, optional\n"
+        "- confidence: number, optional\n"
+        "Do not wrap in markdown fences. Do not return any prose outside the JSON object.\n"
         "<MYSQL_CATALOG_JSON>\n"
         f"{catalog_json}\n"
         "</MYSQL_CATALOG_JSON>\n"
@@ -186,24 +227,30 @@ def _extract_llm_response_text(body: dict[str, Any]) -> str:
 
 
 def _parse_llm_sql_plan(raw_text: str, analysis_plan: AnalysisPlan) -> SQLPlan:
-    payload = json.loads(raw_text)
-    if not isinstance(payload, dict):
-        raise ValueError("LLM planner payload must be a JSON object.")
-    generated_sql = payload.get("generated_sql")
-    if not isinstance(generated_sql, str) or not generated_sql.strip():
-        raise ValueError("LLM planner payload missing generated_sql.")
-    return SQLPlan(
-        selected_tables=[str(x) for x in payload.get("selected_tables", [])],
-        selected_columns=[str(x) for x in payload.get("selected_columns", [])],
+    payload = LLMPlannerPayload.model_validate_json(raw_text)
+    plan = SQLPlan(
+        selected_tables=payload.selected_tables,
+        selected_columns=payload.selected_columns,
         metric=analysis_plan.metric,
         dimension=analysis_plan.dimension,
         filters=list(analysis_plan.filters),
-        generated_sql=generated_sql.strip(),
-        reasoning=str(payload.get("reasoning") or "LLM plan selected SQL from catalog-aware prompt."),
+        generated_sql=payload.generated_sql.strip(),
+        reasoning=payload.reasoning or "LLM plan selected SQL from catalog-aware prompt.",
         route_kind=analysis_plan.route_kind,
         planner_mode="llm",
-        confidence=_coerce_confidence(payload.get("confidence")),
+        confidence=_coerce_confidence(payload.confidence),
     )
+    emit_trace(
+        "planner.llm_parsed",
+        "Parsed LLM planner response.",
+        {
+            "selected_tables": plan.selected_tables,
+            "selected_columns": plan.selected_columns,
+            "generated_sql": plan.generated_sql,
+            "confidence": plan.confidence,
+        },
+    )
+    return plan
 
 
 def _coerce_confidence(value: Any) -> float | None:

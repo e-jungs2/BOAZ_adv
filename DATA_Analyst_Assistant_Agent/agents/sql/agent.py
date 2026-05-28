@@ -22,6 +22,7 @@ from DATA_Analyst_Assistant_Agent.models import (
     OrchestrationState,
     ValidationBlock,
 )
+from DATA_Analyst_Assistant_Agent.tracing import emit_trace
 
 
 class SQLAgent:
@@ -30,9 +31,47 @@ class SQLAgent:
     def run(self, state: OrchestrationState, runtime: AgentRuntime) -> AgentEnvelope:
         plan = state.plan
         context = runtime.context(state, node_name=self.name, tool_name="sql_agent.preview")
+        emit_trace(
+            "sql_agent.start",
+            "Starting SQL agent.",
+            {"route_kind": state.route_kind, "planner_mode": state.planner_mode, "user_query": state.user_query},
+        )
 
         # 1. Build SQL plan
-        sql_plan = build_sql_plan(state.user_query, plan)
+        try:
+            sql_plan = build_sql_plan(state.user_query, plan)
+        except Exception as exc:
+            error_payload = self._build_retry_error_payload(state, state.user_query, exc)
+            state.error_state = error_payload
+            if plan is not None:
+                plan.retry_context = error_payload
+            return AgentEnvelope(
+                status=AgentStatus.failed,
+                agent_name=self.name,
+                summary=f"SQL planning failed: {error_payload['message']}",
+                validation=ValidationBlock(
+                    local_checks=[
+                        LocalCheck(
+                            name="planner_execution",
+                            passed=False,
+                            severity="error",
+                            detail=error_payload["message"],
+                        )
+                    ]
+                ),
+                retry_hint={"retryable": False, "suggested_action": "configure_llm_planner", "reason_code": error_payload["code"]},
+                next_handoff="validation_agent",
+            )
+        emit_trace(
+            "sql_agent.plan_ready",
+            "SQL plan built.",
+            {
+                "planner_mode": sql_plan.planner_mode,
+                "selected_tables": sql_plan.selected_tables,
+                "selected_columns": sql_plan.selected_columns,
+                "generated_sql": sql_plan.generated_sql,
+            },
+        )
         state.generated_sql = sql_plan.generated_sql
         state.planner_mode = str(sql_plan.planner_mode)
         if plan is not None:
@@ -51,6 +90,15 @@ class SQLAgent:
                 sql_plan.generated_sql,
                 datasource_id=state.datasource_id,
                 context=context,
+            )
+            emit_trace(
+                "sql_agent.preview_ready",
+                "SQL preview artifact created.",
+                {
+                    "artifact_id": preview_ref.artifact_id,
+                    "row_count": preview_ref.preview.get("row_count"),
+                    "columns": preview_ref.preview.get("columns"),
+                },
             )
         except Exception as exc:
             error_payload = self._build_retry_error_payload(state, sql_plan.generated_sql, exc)

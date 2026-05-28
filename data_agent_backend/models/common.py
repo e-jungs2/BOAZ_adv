@@ -3,6 +3,7 @@ from __future__ import annotations
 import enum
 import sys
 from datetime import datetime, timezone
+from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
@@ -37,9 +38,14 @@ class BackendError(Exception):
 def to_jsonable(value: Any) -> Any:
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
+    if isinstance(value, Decimal):
+        return int(value) if value == value.to_integral_value() else float(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
     if isinstance(value, list):
+        return [to_jsonable(item) for item in value]
+    if isinstance(value, tuple):
         return [to_jsonable(item) for item in value]
     if isinstance(value, dict):
         return {str(key): to_jsonable(item) for key, item in value.items()}
     return value
-

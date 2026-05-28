@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import shutil
 import uuid
+from decimal import Decimal
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -222,6 +223,26 @@ class TestBackendAdapterDatasource:
         ds.query_datasource.assert_called_once()
         assert ref.preview["row_count"] == 1
         assert ref.preview["columns"] == ["answer"]
+
+    def test_run_sql_preview_with_datasource_serializes_decimal_preview(self, adapter):
+        ds = adapter.services.datasource_service
+        rec = ds.register(_make_request())
+        ds.query_datasource = MagicMock(return_value=(
+            [("Delayed", Decimal("3.5000"))],
+            ["delivery_status", "average_review_score"],
+            "delivery_status,average_review_score\r\nDelayed,3.5000\r\n",
+        ))
+
+        run = adapter.create_run()
+        ref = adapter.run_sql_preview(
+            run.run_id,
+            "SELECT 'Delayed' AS delivery_status, 3.5 AS average_review_score",
+            datasource_id=rec.datasource_id,
+        )
+
+        assert ref.preview["sample_rows"] == [
+            {"delivery_status": "Delayed", "average_review_score": 3.5}
+        ]
 
     def test_run_sql_preview_with_datasource_blocks_write_sql(self, adapter):
         ds = adapter.services.datasource_service
