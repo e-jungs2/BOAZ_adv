@@ -1,176 +1,201 @@
 from __future__ import annotations
 
+import csv
+import io
 import json
+import sys
+from pathlib import Path
 from typing import Any
 
-from data_agent_backend.models.common import BackendError
-
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
-from DATA_Analyst_Assistant_Agent.agents.sql.mart import (
-    build_mart_candidate,
-    needs_mart_candidate,
-    register_mart_candidate_artifact,
-)
-from DATA_Analyst_Assistant_Agent.agents.sql.planner import SQLPlan, build_sql_plan
-from DATA_Analyst_Assistant_Agent.agents.sql.self_check import run_sql_self_check
-from DATA_Analyst_Assistant_Agent.models import (
-    AgentEnvelope,
-    AgentStatus,
-    ApprovalRequirement,
-    BusinessFlag,
-    LocalCheck,
-    OrchestrationState,
-    ValidationBlock,
-)
+from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, AgentStatus, LocalCheck, OrchestrationState, ValidationBlock
 
 
 class SQLAgent:
     name = "sql_agent"
 
     def run(self, state: OrchestrationState, runtime: AgentRuntime) -> AgentEnvelope:
-        plan = state.plan
-        context = runtime.context(state, node_name=self.name, tool_name="sql_agent.preview")
+        result = self._run_main_sql_agent(state)
+        return self._envelope_from_main_result(state, runtime, result)
 
-        # 1. Build SQL plan
-        sql_plan = build_sql_plan(state.user_query, plan)
-        state.generated_sql = sql_plan.generated_sql
-        state.planner_mode = str(sql_plan.planner_mode)
-        if plan is not None:
-            plan.generated_sql = sql_plan.generated_sql
-            plan.planner_mode = "llm" if sql_plan.planner_mode == "llm" else "deterministic"
+    def _run_main_sql_agent(self, state: OrchestrationState) -> dict[str, Any]:
+        src_path = Path(__file__).resolve().parents[3] / "sql_agent" / "lang graph" / "src"
+        if str(src_path) not in sys.path:
+            sys.path.insert(0, str(src_path))
 
-        # 2. Pre-execution self-check
-        pre_checks = run_sql_self_check(sql_plan.generated_sql)
-        if not all(c.passed for c in pre_checks):
-            return self._failed_envelope(pre_checks, sql_plan)
+        from sql_agent.sql_agent import build_app
 
-        # 3. Execute preview through backend
-        try:
-            preview_ref = runtime.adapter.run_sql_preview(
-                state.run_id,
-                sql_plan.generated_sql,
-                datasource_id=state.datasource_id,
-                context=context,
-            )
-        except Exception as exc:
-            error_payload = self._build_retry_error_payload(state, sql_plan.generated_sql, exc)
-            state.error_state = error_payload
-            if plan is not None:
-                plan.retry_context = error_payload
-            return AgentEnvelope(
-                status=AgentStatus.failed,
-                agent_name=self.name,
-                summary=f"SQL preview failed: {error_payload['message']}",
-                validation=ValidationBlock(
-                    local_checks=[
-                        LocalCheck(
-                            name="preview_execution",
-                            passed=False,
-                            severity="error",
-                            detail=error_payload["message"],
-                        )
-                    ]
-                ),
-                retry_hint={"retryable": True, "suggested_action": "fix_sql", "reason_code": error_payload["code"]},
-                next_handoff="validation_agent",
-            )
-
-        # 4. Post-execution self-check
-        columns = preview_ref.preview.get("columns", [])
-        row_count = int(preview_ref.preview.get("row_count", 0) or 0)
-        post_checks = run_sql_self_check(
-            sql_plan.generated_sql, columns=columns, row_count=row_count,
+        app = build_app()
+        return app.invoke(
+            {
+                "user_question": state.user_query,
+                "schema_text": "",
+                "integrity_text": "",
+                "plan": {},
+                "mart_design": {},
+                "sql_draft": {},
+                "sql_result": None,
+                "row_count": 0,
+                "precheck_result": None,
+                "postcheck_result": None,
+                "mart_quality_result": {},
+                "validation": {},
+                "retry_count": 0,
+                "max_retries": 2,
+                "feedback": "",
+                "error": "",
+                "final_answer": "",
+            }
         )
 
-        # 5. Register SQL plan artifact
+    def _envelope_from_main_result(
+        self,
+        state: OrchestrationState,
+        runtime: AgentRuntime,
+        result: dict[str, Any],
+    ) -> AgentEnvelope:
+        context = runtime.context(state, node_name=self.name, tool_name="sql_agent.lang_graph")
+        sql_draft = result.get("sql_draft") or {}
+        generated_sql = sql_draft.get("sql") or ""
+        state.generated_sql = generated_sql
+        state.planner_mode = "llm"
+        if state.plan is not None:
+            state.plan.generated_sql = generated_sql
+            state.plan.source_sql = generated_sql
+            state.plan.planner_mode = "llm"
+
+        plan_payload = {
+            "plan": result.get("plan") or {},
+            "mart_design": result.get("mart_design") or {},
+            "sql_draft": sql_draft,
+            "validation": result.get("validation") or {},
+            "final_answer": result.get("final_answer") or "",
+            "source": "main/sql_agent/lang graph",
+        }
         plan_ref = runtime.adapter.register_artifact(
             state.run_id,
             "file",
-            content_text=json.dumps(sql_plan.model_dump(mode="json"), ensure_ascii=False, indent=2),
-            filename=f"sql_plan_{state.run_id}.json",
-            created_by_tool="DATA_Analyst_Assistant_Agent.sql_agent.planner",
+            content_text=json.dumps(plan_payload, ensure_ascii=False, indent=2, default=str),
+            filename=f"sql_lang_graph_result_{state.run_id}.json",
+            created_by_tool="sql_agent.lang_graph",
             context=context,
             metadata={
-                "kind": "sql_plan",
-                "metric": sql_plan.metric,
-                "dimension": sql_plan.dimension,
-                "planner_mode": sql_plan.planner_mode,
+                "kind": "sql_lang_graph_result",
+                "source": "main/sql_agent/lang graph",
+                "sql_type": sql_draft.get("sql_type"),
             },
-            preview={"metric": sql_plan.metric, "dimension": sql_plan.dimension, "planner_mode": sql_plan.planner_mode},
+            preview={
+                "question_type": (result.get("plan") or {}).get("question_type"),
+                "task_type": (result.get("plan") or {}).get("task_type"),
+                "validation": (result.get("validation") or {}).get("result"),
+                "final_answer": result.get("final_answer") or "",
+            },
         )
-
-        # 6. Register GE-style validation artifact
-        ge_ref = runtime.adapter.register_ge_validation(
+        sql_ref = runtime.adapter.register_artifact(
             state.run_id,
-            table_name="sql_preview",
-            source_ref=preview_ref,
-            passed=all(c.passed for c in post_checks),
-            row_count=row_count,
-            schema_fingerprint="preview-columns:" + ",".join(columns),
+            "sql_query",
+            content_text=generated_sql,
+            filename=f"generated_sql_{state.run_id}.sql",
+            created_by_tool="sql_agent.lang_graph",
             context=context,
+            parent_ids=[plan_ref.artifact_id],
+            metadata={"kind": "generated_sql", "source": "main/sql_agent/lang graph"},
+            preview={"sql": generated_sql, "sql_type": sql_draft.get("sql_type")},
         )
 
-        # 7. Collect artifact refs
-        artifact_refs = [preview_ref, plan_ref, ge_ref]
-        flags: list[BusinessFlag] = []
+        result_csv, result_columns, result_row_count = self._main_sql_result_to_csv(result.get("sql_result"))
+        result_ref = runtime.adapter.register_artifact(
+            state.run_id,
+            "sql_result",
+            content_text=result_csv,
+            filename=f"sql_lang_graph_result_{state.run_id}.csv",
+            created_by_tool="sql_agent.lang_graph",
+            context=context,
+            parent_ids=[sql_ref.artifact_id],
+            lineage_edge_type="query_result_of",
+            metadata={"kind": "sql_result", "source": "main/sql_agent/lang graph"},
+            preview={
+                "row_count": result_row_count,
+                "columns": result_columns,
+                "sample_rows": self._sample_rows_for_preview(result.get("sql_result")),
+            },
+        )
 
-        # 8. Mart candidate handling
-        requires_mart = bool(plan and plan.requires_mart_review) or needs_mart_candidate(state.user_query)
-        if requires_mart:
-            candidate = build_mart_candidate(sql_plan, row_count=row_count, columns=columns)
-            mart_artifact_id = register_mart_candidate_artifact(
-                state, runtime, candidate, preview_ref.artifact_id,
-            )
-            state.mart_candidate_ids.append(mart_artifact_id)
-            flags.append(
-                BusinessFlag(
-                    code="mart_candidate",
-                    severity="info",
-                    message="User query indicates repeatable analysis or mart storage intent.",
+        validation = result.get("validation") or {}
+        checks = [
+            LocalCheck(
+                name="main_sql_agent_generated_sql",
+                passed=bool(generated_sql.strip()),
+                severity="error" if not generated_sql.strip() else "info",
+                detail="SQL LangGraph generated SQL." if generated_sql.strip() else "SQL LangGraph did not return SQL.",
+            ),
+            LocalCheck(
+                name="main_sql_agent_result_rows",
+                passed=result_row_count >= 0,
+                severity="info",
+                detail=f"row_count={result_row_count}.",
+            ),
+        ]
+        if validation.get("result") == "invalid":
+            checks.append(
+                LocalCheck(
+                    name="main_sql_agent_validation",
+                    passed=False,
+                    severity="error",
+                    detail=validation.get("reason", "SQL LangGraph validation failed."),
                 )
             )
 
+        has_error = any(not check.passed and check.severity == "error" for check in checks)
         return AgentEnvelope(
-            status=AgentStatus.approval_required if requires_mart else AgentStatus.success,
+            status=AgentStatus.failed if has_error else AgentStatus.success,
             agent_name=self.name,
-            summary="SQL preview completed.",
-            artifact_refs=artifact_refs,
-            validation=ValidationBlock(
-                local_checks=post_checks,
-                integrity_refs=[ge_ref],
-                business_flags=flags,
-            ),
-            approval=ApprovalRequirement(
-                required=requires_mart,
-                reason="Reusable mart persistence requires user approval." if requires_mart else "",
-                approval_type="mart_persistence" if requires_mart else "",
-            ),
-            context_refs=[{"kind": "run", "ref_id": state.run_id, "summary": "current run"}],
-            next_handoff="validation_agent",
-        )
-
-    def _failed_envelope(self, checks: list[LocalCheck], sql_plan: SQLPlan) -> AgentEnvelope:
-        return AgentEnvelope(
-            status=AgentStatus.failed,
-            agent_name=self.name,
-            summary=f"SQL self-check failed: {[c.detail for c in checks if not c.passed]}",
+            summary=result.get("final_answer") or "SQL LangGraph agent completed.",
+            artifact_refs=[result_ref, plan_ref, sql_ref],
             validation=ValidationBlock(local_checks=checks),
-            retry_hint={"retryable": True, "suggested_action": "fix_sql", "reason_code": "self_check_failed"},
+            retry_hint={
+                "retryable": has_error,
+                "suggested_action": "fix_sql",
+                "reason_code": "main_sql_agent_validation" if has_error else "none",
+            },
             next_handoff="validation_agent",
         )
 
     @staticmethod
-    def _build_retry_error_payload(state: OrchestrationState, query: str, exc: Exception) -> dict[str, Any]:
-        if isinstance(exc, BackendError):
-            code = exc.code
-            message = exc.message
-        else:
-            code = type(exc).__name__
-            message = str(exc)
-        return {
-            "code": code or "preview_execution_failed",
-            "message": message or "SQL preview failed.",
-            "query": query,
-            "datasource_id": state.datasource_id,
-            "step": state.current_step or "sql_agent",
-        }
+    def _main_sql_result_to_csv(rows: Any) -> tuple[str, list[str], int]:
+        if not rows:
+            return "", [], 0
+
+        normalized_rows: list[dict[str, Any]] = []
+        for row in rows:
+            if hasattr(row, "_mapping"):
+                normalized_rows.append(dict(row._mapping))
+            elif isinstance(row, dict):
+                normalized_rows.append(row)
+            elif isinstance(row, (list, tuple)):
+                normalized_rows.append({f"col_{idx + 1}": value for idx, value in enumerate(row)})
+            else:
+                normalized_rows.append({"value": row})
+
+        columns = list(normalized_rows[0].keys())
+        output = io.StringIO()
+        writer = csv.DictWriter(output, fieldnames=columns, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(normalized_rows)
+        return output.getvalue(), columns, len(normalized_rows)
+
+    @staticmethod
+    def _sample_rows_for_preview(rows: Any) -> list[dict[str, Any]]:
+        if not rows:
+            return []
+        sample_rows = []
+        for row in list(rows)[:5]:
+            if hasattr(row, "_mapping"):
+                sample_rows.append(dict(row._mapping))
+            elif isinstance(row, dict):
+                sample_rows.append(row)
+            elif isinstance(row, (list, tuple)):
+                sample_rows.append({f"col_{idx + 1}": value for idx, value in enumerate(row)})
+            else:
+                sample_rows.append({"value": row})
+        return sample_rows

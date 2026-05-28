@@ -1,8 +1,17 @@
 pydantic
 pandas
+numpy
 duckdb
 sqlglot
 pymysql
 python-dotenv
 fastapi
 pytest
+sqlalchemy
+langgraph
+langchain-core
+langchain-openai
+langchain-google-genai
+matplotlib
+seaborn
+scikit-learn
