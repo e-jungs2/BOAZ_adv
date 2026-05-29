@@ -24,6 +24,15 @@ from DATA_Analyst_Assistant_Agent.models import (
     SupervisorTerminalState,
 )
 
+AGENT_LOG_LABELS = {
+    "sql_agent": "SQL agent",
+    "eda_agent": "EDA agent",
+    "analysis_agent": "Analysis agent",
+    "visualization_agent": "Visualization agent",
+    "report_agent": "Report agent",
+    "validation_agent": "Validation agent",
+}
+
 
 class SQLAgentSupervisor:
     """LangGraph-compatible orchestration supervisor for DATA_Analyst_Assistant_Agent."""
@@ -77,6 +86,7 @@ class SQLAgentSupervisor:
             datasource_id=resolved_datasource_id,
         )
         self.adapter.update_run_status(state.run_id, RunStatus.running)
+        self._log("Orchestration 실행 시작")
         self.adapter.append_run_event(
             state.run_id,
             "supervisor.started",
@@ -117,6 +127,7 @@ class SQLAgentSupervisor:
         state = graph_state["state"]
         query = state.user_query
         query_lower = query.lower()
+        self._log("Plan agent 실행 시작")
 
         requires_mart = any(token in query for token in ("반복", "데이터마트", "마트", "저장", "재사용"))
         wants_trend = any(token in query_lower for token in ("trend", "monthly", "chart")) or any(
@@ -127,6 +138,58 @@ class SQLAgentSupervisor:
         )
         wants_analysis = any(token in query_lower for token in ("analysis", "analyze", "insight")) or any(
             token in query for token in ("분석", "인사이트")
+        )
+
+        # Demo/user-facing Korean queries should route by intent, not only by the
+        # older mojibake keyword set above.
+        requires_mart = requires_mart or any(
+            token in query_lower
+            for token in ("mart", "data mart", "reuse", "persist", "반복", "데이터마트", "마트", "저장", "재사용")
+        )
+        wants_trend = wants_trend or any(
+            token in query_lower
+            for token in ("trend", "monthly", "chart", "visualization", "시계열", "월별", "추이", "차트", "시각화")
+        )
+        wants_eda = wants_eda or any(
+            token in query_lower
+            for token in (
+                "eda",
+                "profile",
+                "profiling",
+                "quality",
+                "distribution",
+                "outlier",
+                "missing",
+                "프로파일",
+                "품질",
+                "분포",
+                "이상치",
+                "결측",
+                "상위",
+                "평균",
+                "율",
+                "비율",
+            )
+        )
+        wants_analysis = wants_analysis or any(
+            token in query_lower
+            for token in (
+                "analysis",
+                "analyze",
+                "insight",
+                "compare",
+                "rank",
+                "calculate",
+                "분석",
+                "계산",
+                "비교",
+                "순위",
+                "상위",
+                "평균",
+                "지연율",
+                "리뷰",
+                "보여줘",
+            )
         )
 
         if requires_mart:
@@ -175,6 +238,7 @@ class SQLAgentSupervisor:
             source_sql="SELECT 1 AS sample_value",
         )
         state.current_step = "parse_plan"
+        self._log(f"Plan agent 완료: route={route_kind}, 다음 단계={', '.join(remaining_agents)}")
         self.adapter.append_run_event(
             state.run_id,
             "supervisor.plan_created",
@@ -236,11 +300,14 @@ class SQLAgentSupervisor:
         elif agent_name in state.remaining_agents:
             state.remaining_agents.remove(agent_name)
         state.current_step = agent.name
+        self._log(f"{self._agent_label(agent.name)} 실행 시작")
         self.adapter.append_run_event(state.run_id, "agent.started", f"{agent.name} started.", node_name=agent.name)
         envelope = agent.run(state, self.runtime)
         self._record_agent_result(state, envelope)
         state.last_agent = envelope.agent_name
         state.completed_agents.append(envelope.agent_name)
+        artifact_count = len(envelope.artifact_ids())
+        self._log(f"{self._agent_label(agent.name)} 완료: status={envelope.status.value}, artifacts={artifact_count}")
         return {**graph_state, "state": state, "last_agent_result": envelope}
 
     def run_sql_agent(self, graph_state: dict[str, Any]) -> dict[str, Any]:
@@ -275,9 +342,11 @@ class SQLAgentSupervisor:
         upstream = graph_state["last_agent_result"]
         if upstream is None:
             raise RuntimeError("Validation requires an upstream agent result.")
+        self._log(f"{self._agent_label(self.validation_agent.name)} 실행 시작: target={upstream.agent_name}")
         validation = self.validation_agent.run(state, self.runtime, upstream)
         state.validation_status = validation.status.value
         self._record_agent_result(state, validation)
+        self._log(f"{self._agent_label(self.validation_agent.name)} 완료: status={validation.status.value}")
         return {**graph_state, "state": state, "last_validation_result": validation}
 
     def supervisor_gate(self, graph_state: dict[str, Any]) -> dict[str, Any]:
@@ -358,6 +427,7 @@ class SQLAgentSupervisor:
         state = graph_state["state"]
         state.current_step = "finalize"
         state.terminal_state = SupervisorTerminalState.completed
+        self._log("Orchestration 완료")
         self.adapter.append_run_event(state.run_id, "supervisor.completed", "Supervisor completed.", node_name="finalize")
         self.adapter.update_run_status(state.run_id, RunStatus.succeeded, metadata={"terminal_state": state.terminal_state.value})
         return {**graph_state, "state": state}
@@ -399,3 +469,11 @@ class SQLAgentSupervisor:
                 "approval_required": envelope.approval.required,
             },
         )
+
+    @staticmethod
+    def _agent_label(agent_name: str) -> str:
+        return AGENT_LOG_LABELS.get(agent_name, agent_name)
+
+    @staticmethod
+    def _log(message: str) -> None:
+        print(f"✅ {message}", flush=True)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import csv
+import datetime
+import decimal
 import io
 import json
 import sys
@@ -169,13 +171,13 @@ class SQLAgent:
         normalized_rows: list[dict[str, Any]] = []
         for row in rows:
             if hasattr(row, "_mapping"):
-                normalized_rows.append(dict(row._mapping))
+                normalized_rows.append(SQLAgent._json_safe(dict(row._mapping)))
             elif isinstance(row, dict):
-                normalized_rows.append(row)
+                normalized_rows.append(SQLAgent._json_safe(row))
             elif isinstance(row, (list, tuple)):
-                normalized_rows.append({f"col_{idx + 1}": value for idx, value in enumerate(row)})
+                normalized_rows.append(SQLAgent._json_safe({f"col_{idx + 1}": value for idx, value in enumerate(row)}))
             else:
-                normalized_rows.append({"value": row})
+                normalized_rows.append({"value": SQLAgent._json_safe(row)})
 
         columns = list(normalized_rows[0].keys())
         output = io.StringIO()
@@ -191,11 +193,23 @@ class SQLAgent:
         sample_rows = []
         for row in list(rows)[:5]:
             if hasattr(row, "_mapping"):
-                sample_rows.append(dict(row._mapping))
+                sample_rows.append(SQLAgent._json_safe(dict(row._mapping)))
             elif isinstance(row, dict):
-                sample_rows.append(row)
+                sample_rows.append(SQLAgent._json_safe(row))
             elif isinstance(row, (list, tuple)):
-                sample_rows.append({f"col_{idx + 1}": value for idx, value in enumerate(row)})
+                sample_rows.append(SQLAgent._json_safe({f"col_{idx + 1}": value for idx, value in enumerate(row)}))
             else:
-                sample_rows.append({"value": row})
+                sample_rows.append({"value": SQLAgent._json_safe(row)})
         return sample_rows
+
+    @staticmethod
+    def _json_safe(value: Any) -> Any:
+        if isinstance(value, decimal.Decimal):
+            return float(value)
+        if isinstance(value, (datetime.date, datetime.datetime)):
+            return value.isoformat()
+        if isinstance(value, dict):
+            return {str(key): SQLAgent._json_safe(item) for key, item in value.items()}
+        if isinstance(value, (list, tuple)):
+            return [SQLAgent._json_safe(item) for item in value]
+        return value

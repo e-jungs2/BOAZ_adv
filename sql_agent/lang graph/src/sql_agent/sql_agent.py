@@ -610,7 +610,39 @@ SQL 결과:
 - 결과 범위 안에서만 설명
 """
     answer = llm.invoke(prompt).content.strip()
+    if _looks_like_markdown_table(answer):
+        rewrite_prompt = f"""
+너는 데이터 분석 결과를 사용자에게 설명하는 한국어 분석가다.
+
+사용자 질문:
+{state['user_question']}
+
+SQL 결과:
+{format_result_rows(state['sql_result'], max_rows=20)}
+
+초안 답변:
+{answer}
+
+다시 작성 규칙:
+- 반드시 한국어로 작성한다.
+- 마크다운 표를 절대 만들지 않는다.
+- 결과 표는 최종 리포트의 SQL Result Table 섹션에서 따로 보여주므로, 여기서는 해석만 쓴다.
+- 먼저 1~2문장으로 핵심 결과와 가장 중요한 해석을 설명한다.
+- 그 다음 SQL 결과의 각 행을 "- **항목명**: 주요 수치..." 형식의 bullet 목록으로 정리해도 된다.
+- bullet 목록에는 배송 지연율, 전체 주문 수, 배송 지연 주문 수, 평균 리뷰 점수를 포함한다.
+- 마지막에 1문장으로 리뷰 점수와 배송 지연율 관계 또는 해석 시 주의점을 덧붙인다.
+- 숫자는 SQL 결과에 있는 값만 사용한다.
+- 마지막 문장은 "따라서"로 시작해 결론을 정리한다.
+"""
+        answer = llm.invoke(rewrite_prompt).content.strip()
     return {"final_answer": answer}
+
+
+def _looks_like_markdown_table(text: str) -> bool:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    table_lines = [line for line in lines if line.startswith("|") and line.endswith("|")]
+    separator_lines = [line for line in table_lines if set(line.replace("|", "").strip()) <= {"-", ":"}]
+    return len(table_lines) >= 3 and bool(separator_lines)
 
 
 def increase_retry(state: AgentState):
