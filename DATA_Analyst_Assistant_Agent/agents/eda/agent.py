@@ -61,12 +61,12 @@ class EDAAgent:
 
         import pandas as pd
 
-        from eda_agent.skills.comparison_skill import run_comparison_skill
-        from eda_agent.skills.data_quality_skill import run_data_quality_skill
-        from eda_agent.skills.distribution_skill import run_distribution_skill
-        from eda_agent.skills.relationship_skill import run_relationship_skill
-        from eda_agent.skills.time_skill import run_time_skill
-        from eda_agent.tools.profiling import get_basic_profile
+        from DATA_Analyst_Assistant_Agent.agents.eda.skills.comparison_skill import run_comparison_skill
+        from DATA_Analyst_Assistant_Agent.agents.eda.skills.data_quality_skill import run_data_quality_skill
+        from DATA_Analyst_Assistant_Agent.agents.eda.skills.distribution_skill import run_distribution_skill
+        from DATA_Analyst_Assistant_Agent.agents.eda.skills.relationship_skill import run_relationship_skill
+        from DATA_Analyst_Assistant_Agent.agents.eda.skills.time_skill import run_time_skill
+        from DATA_Analyst_Assistant_Agent.agents.eda.tools.profiling import get_basic_profile
 
         df = pd.concat(frames, ignore_index=True)
         numeric_cols = list(df.select_dtypes(include=["number"]).columns)

@@ -55,19 +55,16 @@ def _normalize_env() -> None:
 
 
 def _ensure_sql_agent_metadata() -> None:
-    data_dir = ROOT_DIR / "sql_agent" / "lang graph" / "data"
+    data_dir = ROOT_DIR / "DATA_Analyst_Assistant_Agent" / "agents" / "sql" / "data"
     schema_path = data_dir / "db_schema.json"
     integrity_path = data_dir / "db_integrity_result.json"
     if schema_path.exists() and integrity_path.exists():
         return
 
     data_dir.mkdir(parents=True, exist_ok=True)
-    src_path = ROOT_DIR / "sql_agent" / "lang graph" / "src"
-    if str(src_path) not in sys.path:
-        sys.path.insert(0, str(src_path))
 
     from sqlalchemy import inspect
-    from db.db_connect import get_db_engine
+    from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine
 
     engine = get_db_engine()
     if engine is None:
@@ -448,7 +445,7 @@ def _chart_title(filename: str) -> str:
 
 
 def _select_eda_charts(columns: list[str], *, limit: int = 8) -> list[Path]:
-    charts_dir = ROOT_DIR / "eda_agent" / "outputs" / "all"
+    charts_dir = ROOT_DIR / "DATA_Analyst_Assistant_Agent" / "agents" / "eda" / "outputs" / "all"
     if not charts_dir.exists():
         return []
 

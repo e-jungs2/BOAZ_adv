@@ -21,11 +21,7 @@ class SQLAgent:
         return self._envelope_from_main_result(state, runtime, result)
 
     def _run_main_sql_agent(self, state: OrchestrationState) -> dict[str, Any]:
-        src_path = Path(__file__).resolve().parents[3] / "sql_agent" / "lang graph" / "src"
-        if str(src_path) not in sys.path:
-            sys.path.insert(0, str(src_path))
-
-        from sql_agent.sql_agent import build_app
+        from DATA_Analyst_Assistant_Agent.agents.sql.sql_agent.sql_agent import build_app
 
         app = build_app()
         return app.invoke(
