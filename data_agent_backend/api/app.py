@@ -4,12 +4,9 @@ from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
-from data_agent_backend.api.routes_agent import router as agent_router
 from data_agent_backend.api.routes_approvals import router as approvals_router
-from data_agent_backend.api.routes_analysis_context import router as analysis_context_router
 from data_agent_backend.api.routes_artifacts import router as artifacts_router
 from data_agent_backend.api.routes_catalog import router as catalog_router
-from data_agent_backend.api.routes_datasources import router as datasources_router
 from data_agent_backend.api.routes_execution import router as execution_router
 from data_agent_backend.api.routes_exports import router as exports_router
 from data_agent_backend.api.routes_memory import router as memory_router
@@ -41,8 +38,6 @@ def create_app(services: BackendServices | None = None) -> FastAPI:
         return ToolResult.success({"status": "ok"}).model_dump(mode="json")
 
     app.include_router(workspace_router)
-    app.include_router(agent_router)
-    app.include_router(analysis_context_router)
     app.include_router(runs_router)
     app.include_router(artifacts_router)
     app.include_router(memory_router)
@@ -50,7 +45,6 @@ def create_app(services: BackendServices | None = None) -> FastAPI:
     app.include_router(policy_router)
     app.include_router(execution_router)
     app.include_router(catalog_router)
-    app.include_router(datasources_router)
     app.include_router(exports_router)
     return app
 

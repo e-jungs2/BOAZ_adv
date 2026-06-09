@@ -12,22 +12,8 @@ def export_create(
     format: str,
     destination: str | None = None,
     context: dict[str, Any] | None = None,
+    services: BackendServices | None = None,
 ) -> ToolResult:
-    return export_create_impl(
-        artifact_id=artifact_id,
-        format=format,
-        destination=destination,
-        context=context,
-        services=get_services(),
-    )
-
-
-def export_create_impl(
-    *,
-    artifact_id: str,
-    format: str,
-    destination: str | None = None,
-    context: dict[str, Any] | None = None,
-    services: BackendServices,
-) -> ToolResult:
+    services = services or get_services()
     return result_wrap(lambda: services.export_service.create_export(artifact_id, format, destination, context_from(context, "export_create")))
+

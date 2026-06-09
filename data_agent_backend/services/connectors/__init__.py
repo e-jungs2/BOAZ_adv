@@ -1,5 +1,3 @@
-from .base import ConnectionConfig, DatasourceConnector, QueryRows
-from .mysql import MySQLConnector
+from data_agent_backend.services.connectors.mysql_connector import MySQLConnector
 
-__all__ = ["ConnectionConfig", "DatasourceConnector", "MySQLConnector", "QueryRows"]
-
+__all__ = ["MySQLConnector"]

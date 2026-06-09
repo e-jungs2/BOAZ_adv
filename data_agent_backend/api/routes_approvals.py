@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import APIRouter, Depends
 
 from data_agent_backend.api.common import ContextPayload, EmptyRequest, dump_result
-from data_agent_backend.mcp.tools_approvals import approval_get_impl, approval_list_pending_impl, approval_resolve_impl
+from data_agent_backend.mcp.tools_approvals import approval_get, approval_list_pending, approval_resolve
 from data_agent_backend.models.common import BackendModel
 from data_agent_backend.services.factory import BackendServices
 
@@ -29,18 +29,18 @@ class ApprovalResolveRequest(BackendModel):
 
 @router.post("/pending")
 def pending_approvals(payload: EmptyRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(approval_list_pending_impl(context=payload.context, services=services))
+    return dump_result(approval_list_pending(context=payload.context, services=services))
 
 
 @router.post("/get")
 def get_approval(payload: ApprovalGetRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
-    return dump_result(approval_get_impl(approval_id=payload.approval_id, context=payload.context, services=services))
+    return dump_result(approval_get(approval_id=payload.approval_id, context=payload.context, services=services))
 
 
 @router.post("/resolve")
 def resolve_approval(payload: ApprovalResolveRequest, services: BackendServices = Depends(get_backend_services)) -> dict:
     return dump_result(
-        approval_resolve_impl(
+        approval_resolve(
             approval_id=payload.approval_id,
             decision=payload.decision,
             edited_payload=payload.edited_payload,
@@ -48,3 +48,4 @@ def resolve_approval(payload: ApprovalResolveRequest, services: BackendServices 
             services=services,
         )
     )
+

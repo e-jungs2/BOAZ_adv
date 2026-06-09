@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from enum import StrEnum
-
 from .artifacts import ArtifactRef
-from .common import BackendModel
+from .common import BackendModel, StrEnum
 
 
 class ExecutionStatus(StrEnum):
@@ -16,7 +14,7 @@ class ExecutionStatus(StrEnum):
 
 
 class ExecutionLimits(BackendModel):
-    timeout_ms: int | None = None
+    timeout_ms: int = 30_000
     row_limit: int | None = None
     memory_mb: int | None = None
 

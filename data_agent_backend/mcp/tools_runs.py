@@ -13,34 +13,14 @@ def run_create(
     project_id: str | None = None,
     metadata: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    services: BackendServices | None = None,
 ) -> ToolResult:
-    return run_create_impl(
-        run_id=run_id,
-        thread_id=thread_id,
-        project_id=project_id,
-        metadata=metadata,
-        context=context,
-        services=get_services(),
-    )
-
-
-def run_create_impl(
-    *,
-    run_id: str | None = None,
-    thread_id: str | None = None,
-    project_id: str | None = None,
-    metadata: dict[str, Any] | None = None,
-    context: dict[str, Any] | None = None,
-    services: BackendServices,
-) -> ToolResult:
+    services = services or get_services()
     return result_wrap(lambda: services.run_service.create_run(run_id, thread_id, project_id, metadata, context_from(context, "run_create")))
 
 
-def run_get(run_id: str, context: dict[str, Any] | None = None) -> ToolResult:
-    return run_get_impl(run_id=run_id, context=context, services=get_services())
-
-
-def run_get_impl(*, run_id: str, context: dict[str, Any] | None = None, services: BackendServices) -> ToolResult:
+def run_get(run_id: str, context: dict[str, Any] | None = None, services: BackendServices | None = None) -> ToolResult:
+    services = services or get_services()
     return result_wrap(lambda: services.run_service.get_run(run_id, context_from(context, "run_get")))
 
 
@@ -49,24 +29,9 @@ def run_list(
     project_id: str | None = None,
     status: str | None = None,
     context: dict[str, Any] | None = None,
+    services: BackendServices | None = None,
 ) -> ToolResult:
-    return run_list_impl(
-        thread_id=thread_id,
-        project_id=project_id,
-        status=status,
-        context=context,
-        services=get_services(),
-    )
-
-
-def run_list_impl(
-    *,
-    thread_id: str | None = None,
-    project_id: str | None = None,
-    status: str | None = None,
-    context: dict[str, Any] | None = None,
-    services: BackendServices,
-) -> ToolResult:
+    services = services or get_services()
     return result_wrap(lambda: services.run_service.list_runs(thread_id, project_id, status, context_from(context, "run_list")))
 
 
@@ -75,24 +40,9 @@ def run_update_status(
     status: str,
     metadata: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    services: BackendServices | None = None,
 ) -> ToolResult:
-    return run_update_status_impl(
-        run_id=run_id,
-        status=status,
-        metadata=metadata,
-        context=context,
-        services=get_services(),
-    )
-
-
-def run_update_status_impl(
-    *,
-    run_id: str,
-    status: str,
-    metadata: dict[str, Any] | None = None,
-    context: dict[str, Any] | None = None,
-    services: BackendServices,
-) -> ToolResult:
+    services = services or get_services()
     return result_wrap(lambda: services.run_service.update_status(run_id, status, metadata, context_from(context, "run_update_status")))
 
 
@@ -107,36 +57,9 @@ def run_append_event(
     memory_ids: list[str] | None = None,
     metadata: dict[str, Any] | None = None,
     context: dict[str, Any] | None = None,
+    services: BackendServices | None = None,
 ) -> ToolResult:
-    return run_append_event_impl(
-        run_id=run_id,
-        event_type=event_type,
-        message=message,
-        node_name=node_name,
-        tool_name=tool_name,
-        artifact_ids=artifact_ids,
-        approval_id=approval_id,
-        memory_ids=memory_ids,
-        metadata=metadata,
-        context=context,
-        services=get_services(),
-    )
-
-
-def run_append_event_impl(
-    *,
-    run_id: str,
-    event_type: str,
-    message: str,
-    node_name: str | None = None,
-    tool_name: str | None = None,
-    artifact_ids: list[str] | None = None,
-    approval_id: str | None = None,
-    memory_ids: list[str] | None = None,
-    metadata: dict[str, Any] | None = None,
-    context: dict[str, Any] | None = None,
-    services: BackendServices,
-) -> ToolResult:
+    services = services or get_services()
     return result_wrap(
         lambda: services.run_service.append_event(
             run_id,
@@ -153,17 +76,11 @@ def run_append_event_impl(
     )
 
 
-def run_list_events(run_id: str, context: dict[str, Any] | None = None) -> ToolResult:
-    return run_list_events_impl(run_id=run_id, context=context, services=get_services())
-
-
-def run_list_events_impl(*, run_id: str, context: dict[str, Any] | None = None, services: BackendServices) -> ToolResult:
+def run_list_events(run_id: str, context: dict[str, Any] | None = None, services: BackendServices | None = None) -> ToolResult:
+    services = services or get_services()
     return result_wrap(lambda: services.run_service.list_events(run_id, context_from(context, "run_list_events")))
 
 
-def run_summary(run_id: str, context: dict[str, Any] | None = None) -> ToolResult:
-    return run_summary_impl(run_id=run_id, context=context, services=get_services())
-
-
-def run_summary_impl(*, run_id: str, context: dict[str, Any] | None = None, services: BackendServices) -> ToolResult:
+def run_summary(run_id: str, context: dict[str, Any] | None = None, services: BackendServices | None = None) -> ToolResult:
+    services = services or get_services()
     return result_wrap(lambda: services.run_service.get_summary(run_id, context_from(context, "run_summary")))

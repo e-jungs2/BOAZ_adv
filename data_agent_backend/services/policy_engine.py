@@ -93,11 +93,6 @@ class PolicyEngine:
             "approval.read",
             "approval.resolve",
             "policy.evaluate",
-            "datasource.create",
-            "datasource.read",
-            "datasource.test",
-            "datasource.catalog.refresh",
-            "datasource.profile",
         } or action.startswith("run."):
             if action == "workspace.write":
                 if resource_lower.startswith("/artifacts"):
@@ -117,16 +112,7 @@ class PolicyEngine:
                 return self._decision(False, True, RiskLevel.high, "SQL row limit is expensive and requires approval.", ["row_limit"])
             return self._decision(True, False, RiskLevel.low, "Read-only SQL is allowed.")
 
-        if action == "datasource.query":
-            if payload.get("blocked"):
-                return self._decision(False, False, RiskLevel.blocked, str(payload.get("reason") or "Datasource query is blocked."))
-            if payload.get("row_limit", 0) > payload.get("max_row_limit", 10_000):
-                return self._decision(False, True, RiskLevel.high, "Datasource query row limit is expensive and requires approval.", ["row_limit"])
-            return self._decision(True, False, RiskLevel.low, "Read-only datasource query is allowed.")
-
         if action in {"sandbox.python.run", "export.create"}:
-            if action == "sandbox.python.run" and payload.get("sandbox_backend") == "local":
-                return self._decision(True, False, RiskLevel.medium, "Local development Python execution is allowed.")
             if context.approval_id:
                 return self._decision(True, False, RiskLevel.medium, "Approved operation may proceed.")
             return self._decision(False, True, RiskLevel.high, f"{action} requires approval.", ["payload"])
