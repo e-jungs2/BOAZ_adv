@@ -96,3 +96,47 @@ def test_execution_sql_api_rejects_connection_id_field(tmp_path) -> None:
     payload = response.json()
     assert payload["ok"] is False
     assert payload["error"]["code"] == "VALIDATION_ERROR"
+
+
+def test_run_analysis_query_returns_artifact_envelope(tmp_path, monkeypatch) -> None:
+    services = _create_services(tmp_path)
+    datasource_id = _register_datasource(services)
+    run = services.run_service.create_run()
+
+    def fake_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+        assert received_datasource_id == datasource_id
+        assert query == "SELECT 42 AS answer"
+        assert row_limit == 25
+        return [(42,)], ["answer"], "answer\r\n42\r\n"
+
+    monkeypatch.setattr(services.datasource_service, "query_datasource", fake_query_datasource)
+
+    envelope = services.sql_executor.run_analysis_query(
+        query="SELECT 42 AS answer",
+        run_id=run.run_id,
+        datasource_id=datasource_id,
+        row_limit=25,
+    )
+
+    assert envelope["artifact_ref"]["type"] == "sql_result"
+    assert envelope["preview"]["columns"] == ["answer"]
+    assert envelope["preview"]["rows"] == [{"answer": 42}]
+    assert envelope["profile"]["returned_rows"] == 1
+    assert envelope["execution"]["datasource_id"] == datasource_id
+    assert envelope["execution"]["tool_name"] == "db_run_analysis_query"
+    assert envelope["warnings"] == []
+
+
+def test_run_analysis_query_rejects_blocked_sql(tmp_path) -> None:
+    services = _create_services(tmp_path)
+    datasource_id = _register_datasource(services)
+    run = services.run_service.create_run()
+
+    with pytest.raises(BackendError) as exc_info:
+        services.sql_executor.run_analysis_query(
+            query="DROP TABLE users",
+            run_id=run.run_id,
+            datasource_id=datasource_id,
+        )
+
+    assert exc_info.value.code == "POLICY_BLOCKED"

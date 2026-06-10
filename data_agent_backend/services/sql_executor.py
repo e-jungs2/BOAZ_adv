@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from time import perf_counter
+
 try:
     import sqlglot
     from sqlglot import expressions as exp
@@ -107,6 +109,98 @@ class SQLExecutor:
             context,
         )
         return result_artifact.ref()
+
+    def run_analysis_query(
+        self,
+        query: str,
+        run_id: str,
+        datasource_id: str | None = None,
+        context: PolicyContext | None = None,
+        row_limit: int | None = None,
+    ) -> JsonDict:
+        context = context or PolicyContext(run_id=run_id, tool_name="db_run_analysis_query")
+        context = context.model_copy(
+            update={"run_id": context.run_id or run_id, "tool_name": context.tool_name or "db_run_analysis_query"}
+        )
+        resolved_datasource_id = self.datasource_service.resolve_datasource_id(datasource_id)
+        row_limit = row_limit or self.config.default_sql_row_limit
+        validation = self.validate_sql(query, row_limit)
+        decision = self.policy_engine.evaluate(
+            "sql.run",
+            resolved_datasource_id,
+            {
+                "datasource_id": resolved_datasource_id,
+                "row_limit": row_limit,
+                "max_row_limit": self.config.max_sql_row_limit_without_approval,
+                **validation,
+            },
+            context,
+        )
+        if not decision.allowed:
+            raise BackendError("POLICY_BLOCKED", decision.reason, {"decision_id": decision.decision_id})
+        if decision.requires_approval:
+            raise BackendError("APPROVAL_REQUIRED", decision.reason, {"decision_id": decision.decision_id})
+
+        query_artifact = self.registry.register_artifact(
+            ArtifactRegisterRequest(
+                run_id=run_id,
+                type=ArtifactType.sql_query,
+                content_text=query,
+                filename="query.sql",
+                created_by_tool="db_run_analysis_query",
+                thread_id=context.thread_id,
+                project_id=context.project_id,
+                metadata={"datasource_id": resolved_datasource_id, "row_limit": row_limit},
+            ),
+            context,
+        )
+        started = perf_counter()
+        rows, columns, csv_text = self.datasource_service.query_datasource(resolved_datasource_id, query, row_limit)
+        runtime_ms = int((perf_counter() - started) * 1000)
+        preview_rows = [dict(zip(columns, row)) for row in rows[:50]]
+        preview = {
+            "columns": columns,
+            "rows": preview_rows,
+            "truncated": len(rows) > len(preview_rows),
+        }
+        result_artifact = self.registry.register_artifact(
+            ArtifactRegisterRequest(
+                run_id=run_id,
+                type=ArtifactType.sql_result,
+                content_text=csv_text,
+                filename="result.csv",
+                created_by_tool="db_run_analysis_query",
+                thread_id=context.thread_id,
+                project_id=context.project_id,
+                parent_ids=[query_artifact.artifact_id],
+                lineage_edge_type="query_result_of",
+                metadata={"datasource_id": resolved_datasource_id, "row_limit": row_limit, "returned_rows": len(rows)},
+                preview={
+                    "row_count": len(rows),
+                    "columns": columns,
+                    "sample_rows": preview_rows,
+                },
+            ),
+            context,
+        )
+        artifact_ref = result_artifact.ref().model_dump(mode="json")
+        artifact_ref["format"] = "csv"
+        return {
+            "artifact_ref": artifact_ref,
+            "preview": preview,
+            "profile": {
+                "returned_rows": len(rows),
+                "preview_rows": len(preview_rows),
+                "column_count": len(columns),
+            },
+            "execution": {
+                "datasource_id": resolved_datasource_id,
+                "tool_name": "db_run_analysis_query",
+                "row_limit": row_limit,
+                "runtime_ms": runtime_ms,
+            },
+            "warnings": [],
+        }
 
     def validate_sql(self, query: str, row_limit: int) -> JsonDict:
         stripped = query.strip()
