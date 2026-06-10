@@ -44,6 +44,17 @@ def test_resolve_datasource_id_uses_single_registered_datasource(tmp_path) -> No
     assert services.datasource_service.resolve_datasource_id(datasource_id) == datasource_id
 
 
+def test_resolve_datasource_id_rejects_explicit_empty_string(tmp_path) -> None:
+    services = _services(tmp_path)
+    datasource_id = _register(services)
+
+    with pytest.raises(BackendError) as exc_info:
+        services.datasource_service.resolve_datasource_id("")
+
+    assert exc_info.value.code == "NOT_FOUND"
+    assert services.datasource_service.resolve_datasource_id(None) == datasource_id
+
+
 def test_resolve_datasource_id_rejects_ambiguous_default(tmp_path) -> None:
     services = _services(tmp_path)
     _register(services, "primary")

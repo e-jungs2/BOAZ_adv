@@ -67,7 +67,7 @@ class DatasourceService:
         return row["datasource_id"] if row else None
 
     def resolve_datasource_id(self, datasource_id: str | None) -> str:
-        if datasource_id:
+        if datasource_id is not None:
             self.get(datasource_id)
             return datasource_id
 
