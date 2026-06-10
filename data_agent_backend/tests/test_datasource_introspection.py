@@ -8,7 +8,19 @@ from data_agent_backend.models.datasource import DatasourceCreateRequest, Dataso
 from data_agent_backend.services.factory import create_backend_services
 
 
-def _services(tmp_path):
+MYSQL_ENV_KEYS = (
+    "MYSQL_HOST",
+    "MYSQL_DATABASE",
+    "MYSQL_USERNAME",
+    "MYSQL_PASSWORD",
+    "MYSQL_PORT",
+    "MYSQL_DATASOURCE_NAME",
+)
+
+
+def _services(tmp_path, monkeypatch):
+    for key in MYSQL_ENV_KEYS:
+        monkeypatch.delenv(key, raising=False)
     return create_backend_services(BackendConfig(base_data_dir=tmp_path / ".data_agent"))
 
 
@@ -27,8 +39,21 @@ def _register(services, name: str = "analytics_mysql") -> str:
     return record.datasource_id
 
 
-def test_resolve_datasource_id_requires_registered_datasource(tmp_path) -> None:
-    services = _services(tmp_path)
+def test_services_ignore_ambient_mysql_env(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("MYSQL_HOST", "ambient-host")
+    monkeypatch.setenv("MYSQL_DATABASE", "ambient_database")
+    monkeypatch.setenv("MYSQL_USERNAME", "ambient_user")
+    monkeypatch.setenv("MYSQL_PASSWORD", "ambient_secret")
+    monkeypatch.setenv("MYSQL_PORT", "3307")
+    monkeypatch.setenv("MYSQL_DATASOURCE_NAME", "ambient_mysql")
+
+    services = _services(tmp_path, monkeypatch)
+
+    assert services.datasource_service.list_all() == []
+
+
+def test_resolve_datasource_id_requires_registered_datasource(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
 
     with pytest.raises(BackendError) as exc_info:
         services.datasource_service.resolve_datasource_id(None)
@@ -36,16 +61,16 @@ def test_resolve_datasource_id_requires_registered_datasource(tmp_path) -> None:
     assert exc_info.value.code == "DATASOURCE_REQUIRED"
 
 
-def test_resolve_datasource_id_uses_single_registered_datasource(tmp_path) -> None:
-    services = _services(tmp_path)
+def test_resolve_datasource_id_uses_single_registered_datasource(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
 
     assert services.datasource_service.resolve_datasource_id(None) == datasource_id
     assert services.datasource_service.resolve_datasource_id(datasource_id) == datasource_id
 
 
-def test_resolve_datasource_id_rejects_explicit_empty_string(tmp_path) -> None:
-    services = _services(tmp_path)
+def test_resolve_datasource_id_rejects_explicit_empty_string(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
 
     with pytest.raises(BackendError) as exc_info:
@@ -55,8 +80,8 @@ def test_resolve_datasource_id_rejects_explicit_empty_string(tmp_path) -> None:
     assert services.datasource_service.resolve_datasource_id(None) == datasource_id
 
 
-def test_resolve_datasource_id_rejects_ambiguous_default(tmp_path) -> None:
-    services = _services(tmp_path)
+def test_resolve_datasource_id_rejects_ambiguous_default(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
     _register(services, "primary")
     services.datasource_service.register(
         DatasourceCreateRequest(
@@ -76,8 +101,8 @@ def test_resolve_datasource_id_rejects_ambiguous_default(tmp_path) -> None:
     assert exc_info.value.code == "AMBIGUOUS_DATASOURCE"
 
 
-def test_list_agent_datasources_hides_connection_secrets(tmp_path) -> None:
-    services = _services(tmp_path)
+def test_list_agent_datasources_hides_connection_secrets(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
 
     data = services.datasource_service.list_agent_datasources()
