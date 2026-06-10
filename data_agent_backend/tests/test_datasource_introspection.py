@@ -4,7 +4,14 @@ import pytest
 
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.common import BackendError
-from data_agent_backend.models.datasource import DatasourceCreateRequest, DatasourceRecord, DatasourceType
+from data_agent_backend.models.datasource import (
+    CatalogSummary,
+    ColumnInfo,
+    DatasourceCreateRequest,
+    DatasourceRecord,
+    DatasourceType,
+    TableSummary,
+)
 from data_agent_backend.services import factory
 from data_agent_backend.services.connectors.mysql_connector import MySQLConnector
 from data_agent_backend.services.factory import create_backend_services
@@ -222,3 +229,74 @@ def test_fetch_catalog_rejects_unsafe_table_name_before_describe(monkeypatch) ->
     assert exc_info.value.code == "INVALID_IDENTIFIER"
     assert connection.queries == ["SHOW TABLES"]
     assert connection.closed is True
+
+
+class FakeConnector:
+    def __init__(self) -> None:
+        self.describe_calls: list[str] = []
+        self.sample_calls: list[tuple[str, int]] = []
+
+    def fetch_catalog(self) -> CatalogSummary:
+        return CatalogSummary(
+            datasource_id="ds_test",
+            database="analytics",
+            tables={
+                "orders": TableSummary(
+                    columns={
+                        "order_id": ColumnInfo(type="BIGINT", nullable=False, key="PRI"),
+                        "amount": ColumnInfo(type="DECIMAL(10,2)", nullable=True, key=""),
+                    }
+                )
+            },
+            refreshed_at="2026-06-10T00:00:00+00:00",
+        )
+
+    def describe_table(self, table_name: str) -> TableSummary:
+        self.describe_calls.append(table_name)
+        return TableSummary(columns={"order_id": ColumnInfo(type="BIGINT", nullable=False, key="PRI")})
+
+    def sample_rows(self, table_name: str, limit: int):
+        self.sample_calls.append((table_name, limit))
+        return [(1, "paid")], ["order_id", "status"]
+
+
+def test_get_schema_returns_agent_schema_summary(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
+    datasource_id = _register(services)
+    fake = FakeConnector()
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+
+    result = services.datasource_service.get_schema(datasource_id)
+
+    assert result.datasource_id == datasource_id
+    assert result.database == "analytics"
+    assert result.tables[0].name == "orders"
+    assert result.tables[0].columns[0].name == "order_id"
+
+
+def test_describe_table_delegates_to_connector(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
+    datasource_id = _register(services)
+    fake = FakeConnector()
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+
+    result = services.datasource_service.describe_table(datasource_id, "orders")
+
+    assert fake.describe_calls == ["orders"]
+    assert result.table_name == "orders"
+    assert result.columns[0].name == "order_id"
+
+
+def test_sample_rows_returns_fixed_preview_shape(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
+    datasource_id = _register(services)
+    fake = FakeConnector()
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+
+    result = services.datasource_service.sample_rows(datasource_id, "orders", 10)
+
+    assert fake.sample_calls == [("orders", 10)]
+    assert result.columns == ["order_id", "status"]
+    assert result.rows == [{"order_id": 1, "status": "paid"}]
+    assert result.limit == 10
+    assert result.truncated is False

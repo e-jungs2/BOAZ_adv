@@ -4,7 +4,14 @@ import uuid
 from typing import Optional
 
 from data_agent_backend.models.common import BackendError, utc_now_iso
-from data_agent_backend.models.db_tools import AgentDatasourceSummary
+from data_agent_backend.models.db_tools import (
+    AgentDatasourceSummary,
+    DBColumnSummary,
+    DBRowsPreview,
+    DBSchemaSummary,
+    DBTableDescription,
+    DBTableSummary,
+)
 from data_agent_backend.models.datasource import (
     CatalogSummary,
     DatasourceCreateRequest,
@@ -99,6 +106,68 @@ class DatasourceService:
         ]
 
     # ── Query execution ──
+
+    def get_schema(self, datasource_id: str | None = None) -> DBSchemaSummary:
+        resolved_id = self.resolve_datasource_id(datasource_id)
+        record = self.get(resolved_id)
+        connector = self._get_connector(record)
+        catalog = connector.fetch_catalog()
+        return DBSchemaSummary(
+            datasource_id=resolved_id,
+            database=record.database,
+            tables=[
+                DBTableSummary(
+                    name=table_name,
+                    columns=[
+                        DBColumnSummary(
+                            name=column_name,
+                            type=column.type,
+                            nullable=column.nullable,
+                            key=column.key,
+                            description=column.description,
+                        )
+                        for column_name, column in table.columns.items()
+                    ],
+                )
+                for table_name, table in catalog.tables.items()
+            ],
+        )
+
+    def describe_table(self, datasource_id: str | None, table_name: str) -> DBTableDescription:
+        resolved_id = self.resolve_datasource_id(datasource_id)
+        record = self.get(resolved_id)
+        connector = self._get_connector(record)
+        table = connector.describe_table(table_name)
+        return DBTableDescription(
+            datasource_id=resolved_id,
+            database=record.database,
+            table_name=table_name,
+            columns=[
+                DBColumnSummary(
+                    name=column_name,
+                    type=column.type,
+                    nullable=column.nullable,
+                    key=column.key,
+                    description=column.description,
+                )
+                for column_name, column in table.columns.items()
+            ],
+        )
+
+    def sample_rows(self, datasource_id: str | None, table_name: str, limit: int | None = None) -> DBRowsPreview:
+        resolved_id = self.resolve_datasource_id(datasource_id)
+        record = self.get(resolved_id)
+        safe_limit = max(1, int(limit or 50))
+        connector = self._get_connector(record)
+        rows, columns = connector.sample_rows(table_name, safe_limit)
+        return DBRowsPreview(
+            datasource_id=resolved_id,
+            table_name=table_name,
+            columns=columns,
+            rows=[dict(zip(columns, row)) for row in rows],
+            limit=safe_limit,
+            truncated=False,
+        )
 
     def query_datasource(
         self, datasource_id: str, query: str, row_limit: int = 1000,
