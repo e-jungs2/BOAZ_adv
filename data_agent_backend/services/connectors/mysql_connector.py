@@ -169,7 +169,7 @@ class MySQLConnector:
 
             for tname in table_names:
                 with conn.cursor() as cur:
-                    cur.execute(f"DESCRIBE `{tname}`")
+                    cur.execute(f"DESCRIBE {self.quote_identifier(tname)}")
                     col_rows = cur.fetchall()
                 columns: dict[str, ColumnInfo] = {}
                 for col in col_rows:

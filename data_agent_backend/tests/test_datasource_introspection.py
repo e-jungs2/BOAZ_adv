@@ -174,3 +174,51 @@ def test_quote_identifier_rejects_unsafe_identifier() -> None:
         connector.quote_identifier("orders; DROP TABLE users")
 
     assert exc_info.value.code == "INVALID_IDENTIFIER"
+
+
+class _FakeCatalogCursor:
+    def __init__(self, connection) -> None:
+        self._connection = connection
+        self._rows = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        return None
+
+    def execute(self, query: str) -> None:
+        self._connection.queries.append(query)
+        if query == "SHOW TABLES":
+            self._rows = [("orders; DROP TABLE users",)]
+            return
+        if query.startswith("DESCRIBE"):
+            raise AssertionError(f"Unsafe DESCRIBE query was executed: {query}")
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeCatalogConnection:
+    def __init__(self) -> None:
+        self.queries = []
+        self.closed = False
+
+    def cursor(self) -> _FakeCatalogCursor:
+        return _FakeCatalogCursor(self)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+def test_fetch_catalog_rejects_unsafe_table_name_before_describe(monkeypatch) -> None:
+    connector = MySQLConnector(_record(), "secret")
+    connection = _FakeCatalogConnection()
+    monkeypatch.setattr(connector, "_connect", lambda: connection)
+
+    with pytest.raises(BackendError) as exc_info:
+        connector.fetch_catalog()
+
+    assert exc_info.value.code == "INVALID_IDENTIFIER"
+    assert connection.queries == ["SHOW TABLES"]
+    assert connection.closed is True
