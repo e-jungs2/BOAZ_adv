@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import csv
 import io
+import re
 from typing import Any
 
 try:
@@ -16,6 +17,9 @@ from data_agent_backend.models.datasource import (
     DatasourceRecord,
     TableSummary,
 )
+
+
+SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 class MySQLConnector:
@@ -57,6 +61,98 @@ class MySQLConnector:
         try:
             with conn.cursor() as cur:
                 cur.execute(wrapped)
+                rows = cur.fetchall()
+                columns = [desc[0] for desc in cur.description or []]
+                return list(rows), columns
+        finally:
+            conn.close()
+
+    def quote_identifier(self, name: str) -> str:
+        if not SAFE_IDENTIFIER_RE.fullmatch(name):
+            raise BackendError(
+                "INVALID_IDENTIFIER",
+                "Only simple MySQL identifiers are allowed.",
+                {"identifier": name},
+            )
+        return f"`{name}`"
+
+    def table_exists(self, table_name: str) -> bool:
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_name = %s
+                    LIMIT 1
+                    """,
+                    (self._record.database, table_name),
+                )
+                return cur.fetchone() is not None
+        finally:
+            conn.close()
+
+    def describe_table(self, table_name: str) -> TableSummary:
+        quoted = self.quote_identifier(table_name)
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_name = %s
+                    LIMIT 1
+                    """,
+                    (self._record.database, table_name),
+                )
+                if cur.fetchone() is None:
+                    raise BackendError(
+                        "NOT_FOUND",
+                        f"Table {table_name} was not found.",
+                        {"table_name": table_name},
+                    )
+
+            with conn.cursor() as cur:
+                cur.execute(f"DESCRIBE {quoted}")
+                col_rows = cur.fetchall()
+
+            columns: dict[str, ColumnInfo] = {}
+            for col in col_rows:
+                columns[col[0]] = ColumnInfo(
+                    type=col[1],
+                    nullable=(col[2] == "YES"),
+                    key=col[3] or "",
+                )
+            return TableSummary(columns=columns)
+        finally:
+            conn.close()
+
+    def sample_rows(self, table_name: str, limit: int) -> tuple[list[tuple], list[str]]:
+        quoted = self.quote_identifier(table_name)
+        safe_limit = max(1, int(limit))
+        conn = self._connect()
+        try:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT 1
+                    FROM information_schema.tables
+                    WHERE table_schema = %s AND table_name = %s
+                    LIMIT 1
+                    """,
+                    (self._record.database, table_name),
+                )
+                if cur.fetchone() is None:
+                    raise BackendError(
+                        "NOT_FOUND",
+                        f"Table {table_name} was not found.",
+                        {"table_name": table_name},
+                    )
+
+            with conn.cursor() as cur:
+                cur.execute(f"SELECT * FROM {quoted} LIMIT %s", (safe_limit,))
                 rows = cur.fetchall()
                 columns = [desc[0] for desc in cur.description or []]
                 return list(rows), columns
