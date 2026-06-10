@@ -6,7 +6,9 @@ import pytest
 from data_agent_backend.api.app import create_app
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.common import BackendError
+from data_agent_backend.models.contexts import PolicyContext
 from data_agent_backend.models.datasource import DatasourceCreateRequest, DatasourceType
+from data_agent_backend.models.policy import PolicyDecision, RiskLevel
 from data_agent_backend.services.factory import create_backend_services
 
 
@@ -140,3 +142,60 @@ def test_run_analysis_query_rejects_blocked_sql(tmp_path) -> None:
         )
 
     assert exc_info.value.code == "POLICY_BLOCKED"
+
+
+def test_run_analysis_query_raises_approval_required_before_policy_blocked(tmp_path, monkeypatch) -> None:
+    services = _create_services(tmp_path)
+    services.config.max_sql_row_limit_without_approval = 10
+    datasource_id = _register_datasource(services)
+    run = services.run_service.create_run()
+
+    def fail_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+        raise AssertionError("query_datasource should not be called when approval is required")
+
+    monkeypatch.setattr(services.datasource_service, "query_datasource", fail_query_datasource)
+
+    with pytest.raises(BackendError) as exc_info:
+        services.sql_executor.run_analysis_query(
+            query="SELECT 1 AS value",
+            run_id=run.run_id,
+            datasource_id=datasource_id,
+            row_limit=11,
+        )
+
+    assert exc_info.value.code == "APPROVAL_REQUIRED"
+
+
+def test_run_analysis_query_forces_policy_context_run_id_and_tool_name(tmp_path, monkeypatch) -> None:
+    services = _create_services(tmp_path)
+    datasource_id = _register_datasource(services)
+    stale_run = services.run_service.create_run()
+    actual_run = services.run_service.create_run()
+    captured_contexts = []
+
+    def fake_evaluate(action, resource="", payload=None, context=None):
+        captured_contexts.append(context)
+        return PolicyDecision(
+            decision_id="pd_allow",
+            allowed=True,
+            requires_approval=False,
+            risk_level=RiskLevel.low,
+            reason="allowed",
+        )
+
+    def fake_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+        return [(1,)], ["value"], "value\r\n1\r\n"
+
+    monkeypatch.setattr(services.policy_engine, "evaluate", fake_evaluate)
+    monkeypatch.setattr(services.datasource_service, "query_datasource", fake_query_datasource)
+
+    services.sql_executor.run_analysis_query(
+        query="SELECT 1 AS value",
+        run_id=actual_run.run_id,
+        datasource_id=datasource_id,
+        context=PolicyContext(run_id=stale_run.run_id, tool_name="some_other_tool"),
+    )
+
+    assert captured_contexts
+    assert captured_contexts[0].run_id == actual_run.run_id
+    assert captured_contexts[0].tool_name == "db_run_analysis_query"

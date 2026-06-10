@@ -119,9 +119,7 @@ class SQLExecutor:
         row_limit: int | None = None,
     ) -> JsonDict:
         context = context or PolicyContext(run_id=run_id, tool_name="db_run_analysis_query")
-        context = context.model_copy(
-            update={"run_id": context.run_id or run_id, "tool_name": context.tool_name or "db_run_analysis_query"}
-        )
+        context = context.model_copy(update={"run_id": run_id, "tool_name": "db_run_analysis_query"})
         resolved_datasource_id = self.datasource_service.resolve_datasource_id(datasource_id)
         row_limit = row_limit or self.config.default_sql_row_limit
         validation = self.validate_sql(query, row_limit)
@@ -136,10 +134,10 @@ class SQLExecutor:
             },
             context,
         )
-        if not decision.allowed:
-            raise BackendError("POLICY_BLOCKED", decision.reason, {"decision_id": decision.decision_id})
         if decision.requires_approval:
             raise BackendError("APPROVAL_REQUIRED", decision.reason, {"decision_id": decision.decision_id})
+        if not decision.allowed:
+            raise BackendError("POLICY_BLOCKED", decision.reason, {"decision_id": decision.decision_id})
 
         query_artifact = self.registry.register_artifact(
             ArtifactRegisterRequest(
