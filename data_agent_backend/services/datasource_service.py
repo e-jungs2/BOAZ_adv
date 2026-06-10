@@ -4,6 +4,7 @@ import uuid
 from typing import Optional
 
 from data_agent_backend.models.common import BackendError, utc_now_iso
+from data_agent_backend.models.db_tools import AgentDatasourceSummary
 from data_agent_backend.models.datasource import (
     CatalogSummary,
     DatasourceCreateRequest,
@@ -64,6 +65,38 @@ class DatasourceService:
     def get_default_id(self) -> Optional[str]:
         row = self._sqlite.query_one("SELECT datasource_id FROM datasources ORDER BY created_at LIMIT 1")
         return row["datasource_id"] if row else None
+
+    def resolve_datasource_id(self, datasource_id: str | None) -> str:
+        if datasource_id:
+            self.get(datasource_id)
+            return datasource_id
+
+        datasources = self.list_all()
+        if not datasources:
+            raise BackendError(
+                "DATASOURCE_REQUIRED",
+                "No datasource is registered. Configure MYSQL_HOST, MYSQL_DATABASE, and MYSQL_USERNAME.",
+            )
+        if len(datasources) > 1:
+            raise BackendError(
+                "AMBIGUOUS_DATASOURCE",
+                "Multiple datasources are registered. Provide datasource_id explicitly.",
+                {"datasource_ids": [item.datasource_id for item in datasources]},
+            )
+        return datasources[0].datasource_id
+
+    def list_agent_datasources(self) -> list[AgentDatasourceSummary]:
+        default_id = self.get_default_id()
+        return [
+            AgentDatasourceSummary(
+                datasource_id=item.datasource_id,
+                name=item.name,
+                type=item.type.value if hasattr(item.type, "value") else str(item.type),
+                database=item.database,
+                is_default=item.datasource_id == default_id,
+            )
+            for item in self.list_all()
+        ]
 
     # ── Query execution ──
 
