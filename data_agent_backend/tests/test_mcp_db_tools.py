@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import pytest
+
 from data_agent_backend.config import BackendConfig
+from data_agent_backend.mcp.server import get_mcp_tools_for_profile
 from data_agent_backend.mcp.tools_db import (
     db_describe_table,
     db_get_schema,
@@ -14,6 +17,10 @@ from data_agent_backend.services.factory import create_backend_services
 
 def _services(tmp_path):
     return create_backend_services(BackendConfig(base_data_dir=tmp_path / ".data_agent"))
+
+
+def _tool_names(profile: str) -> list[str]:
+    return [fn.__name__ for fn in get_mcp_tools_for_profile(profile)]
 
 
 def _register(services) -> str:
@@ -87,3 +94,30 @@ def test_db_tool_functions_are_callable() -> None:
     assert callable(db_list_datasources)
     assert callable(db_run_analysis_query)
     assert callable(db_sample_rows)
+
+
+def test_db_analysis_profile_exposes_exactly_five_db_tools() -> None:
+    assert _tool_names("db_analysis") == [
+        "db_list_datasources",
+        "db_get_schema",
+        "db_describe_table",
+        "db_sample_rows",
+        "db_run_analysis_query",
+    ]
+
+
+def test_full_profile_includes_existing_tools_and_db_tools() -> None:
+    names = _tool_names("full")
+
+    assert "workspace_list" in names
+    assert "sql_run_query" in names
+    assert "sandbox_run_python" in names
+    assert "db_run_analysis_query" in names
+    assert len(names) == 34
+
+
+def test_unknown_profile_fails_fast() -> None:
+    with pytest.raises(ValueError) as exc_info:
+        get_mcp_tools_for_profile("unknown")
+
+    assert "Unsupported MCP profile" in str(exc_info.value)
