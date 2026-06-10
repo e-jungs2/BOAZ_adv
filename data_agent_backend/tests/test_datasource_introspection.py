@@ -5,6 +5,7 @@ import pytest
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.common import BackendError
 from data_agent_backend.models.datasource import DatasourceCreateRequest, DatasourceType
+from data_agent_backend.services import factory
 from data_agent_backend.services.factory import create_backend_services
 
 
@@ -21,6 +22,7 @@ MYSQL_ENV_KEYS = (
 def _services(tmp_path, monkeypatch):
     for key in MYSQL_ENV_KEYS:
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setattr(factory, "find_dotenv", lambda usecwd=True: "")
     return create_backend_services(BackendConfig(base_data_dir=tmp_path / ".data_agent"))
 
 
@@ -39,13 +41,35 @@ def _register(services, name: str = "analytics_mysql") -> str:
     return record.datasource_id
 
 
-def test_services_ignore_ambient_mysql_env(tmp_path, monkeypatch) -> None:
+def test_services_isolate_ambient_mysql_env(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("MYSQL_HOST", "ambient-host")
     monkeypatch.setenv("MYSQL_DATABASE", "ambient_database")
     monkeypatch.setenv("MYSQL_USERNAME", "ambient_user")
     monkeypatch.setenv("MYSQL_PASSWORD", "ambient_secret")
     monkeypatch.setenv("MYSQL_PORT", "3307")
     monkeypatch.setenv("MYSQL_DATASOURCE_NAME", "ambient_mysql")
+
+    services = _services(tmp_path, monkeypatch)
+
+    assert services.datasource_service.list_all() == []
+
+
+def test_services_isolate_dotenv_mysql_config(tmp_path, monkeypatch) -> None:
+    dotenv_path = tmp_path / ".env"
+    dotenv_path.write_text(
+        "\n".join(
+            [
+                "MYSQL_HOST=dotenv-host",
+                "MYSQL_DATABASE=dotenv_database",
+                "MYSQL_USERNAME=dotenv_user",
+                "MYSQL_PASSWORD=dotenv_secret",
+                "MYSQL_PORT=3307",
+                "MYSQL_DATASOURCE_NAME=dotenv_mysql",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(factory, "find_dotenv", lambda usecwd=True: str(dotenv_path))
 
     services = _services(tmp_path, monkeypatch)
 
