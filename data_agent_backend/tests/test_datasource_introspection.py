@@ -300,3 +300,15 @@ def test_sample_rows_returns_fixed_preview_shape(tmp_path, monkeypatch) -> None:
     assert result.rows == [{"order_id": 1, "status": "paid"}]
     assert result.limit == 10
     assert result.truncated is False
+
+
+def test_sample_rows_clamps_explicit_zero_limit_to_one(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
+    datasource_id = _register(services)
+    fake = FakeConnector()
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+
+    result = services.datasource_service.sample_rows(datasource_id, "orders", 0)
+
+    assert fake.sample_calls == [("orders", 1)]
+    assert result.limit == 1

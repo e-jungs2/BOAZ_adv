@@ -157,7 +157,7 @@ class DatasourceService:
     def sample_rows(self, datasource_id: str | None, table_name: str, limit: int | None = None) -> DBRowsPreview:
         resolved_id = self.resolve_datasource_id(datasource_id)
         record = self.get(resolved_id)
-        safe_limit = max(1, int(limit or 50))
+        safe_limit = max(1, int(50 if limit is None else limit))
         connector = self._get_connector(record)
         rows, columns = connector.sample_rows(table_name, safe_limit)
         return DBRowsPreview(
