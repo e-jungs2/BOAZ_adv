@@ -144,6 +144,27 @@ def test_run_analysis_query_rejects_blocked_sql(tmp_path) -> None:
     assert exc_info.value.code == "POLICY_BLOCKED"
 
 
+def test_run_analysis_query_rejects_explicit_zero_row_limit_before_execution(tmp_path, monkeypatch) -> None:
+    services = _create_services(tmp_path)
+    datasource_id = _register_datasource(services)
+    run = services.run_service.create_run()
+
+    def fail_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+        raise AssertionError("query_datasource should not be called for invalid row_limit")
+
+    monkeypatch.setattr(services.datasource_service, "query_datasource", fail_query_datasource)
+
+    with pytest.raises(BackendError) as exc_info:
+        services.sql_executor.run_analysis_query(
+            "SELECT 1 AS value",
+            run.run_id,
+            datasource_id=datasource_id,
+            row_limit=0,
+        )
+
+    assert exc_info.value.code == "POLICY_BLOCKED"
+
+
 def test_run_analysis_query_raises_approval_required_before_policy_blocked(tmp_path, monkeypatch) -> None:
     services = _create_services(tmp_path)
     services.config.max_sql_row_limit_without_approval = 10

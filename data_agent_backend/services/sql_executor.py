@@ -121,7 +121,7 @@ class SQLExecutor:
         context = context or PolicyContext(run_id=run_id, tool_name="db_run_analysis_query")
         context = context.model_copy(update={"run_id": run_id, "tool_name": "db_run_analysis_query"})
         resolved_datasource_id = self.datasource_service.resolve_datasource_id(datasource_id)
-        row_limit = row_limit or self.config.default_sql_row_limit
+        row_limit = self.config.default_sql_row_limit if row_limit is None else row_limit
         validation = self.validate_sql(query, row_limit)
         decision = self.policy_engine.evaluate(
             "sql.run",

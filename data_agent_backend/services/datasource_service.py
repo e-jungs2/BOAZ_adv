@@ -183,7 +183,7 @@ class DatasourceService:
             raise BackendError(
                 "DATASOURCE_QUERY_FAILED",
                 "Datasource query failed.",
-                {"datasource_id": datasource_id, "type": type(exc).__name__, "message": str(exc)},
+                {"datasource_id": datasource_id, "type": type(exc).__name__},
             ) from exc
         csv_text = connector.rows_to_csv(columns, rows)
         return rows, columns, csv_text

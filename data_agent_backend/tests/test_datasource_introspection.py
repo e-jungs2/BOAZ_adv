@@ -312,3 +312,24 @@ def test_sample_rows_clamps_explicit_zero_limit_to_one(tmp_path, monkeypatch) ->
 
     assert fake.sample_calls == [("orders", 1)]
     assert result.limit == 1
+
+
+def test_query_datasource_redacts_connector_exception_details(tmp_path, monkeypatch) -> None:
+    services = _services(tmp_path, monkeypatch)
+    datasource_id = _register(services)
+
+    class FailingConnector:
+        def execute_query(self, query: str, row_limit: int):
+            raise RuntimeError("Access denied for user analyst at localhost with password secret")
+
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: FailingConnector())
+
+    with pytest.raises(BackendError) as exc_info:
+        services.datasource_service.query_datasource(datasource_id, "SELECT 1", 10)
+
+    assert exc_info.value.code == "DATASOURCE_QUERY_FAILED"
+    serialized_details = str(exc_info.value.details)
+    assert "analyst" not in serialized_details
+    assert "localhost" not in serialized_details
+    assert "secret" not in serialized_details
+    assert "Access denied" not in serialized_details
