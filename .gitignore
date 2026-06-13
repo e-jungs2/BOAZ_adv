@@ -25,3 +25,5 @@ wheels/
 gx/uncommitted/
 
 .DS_Store
+demo_outputs/
+eda_agent/
