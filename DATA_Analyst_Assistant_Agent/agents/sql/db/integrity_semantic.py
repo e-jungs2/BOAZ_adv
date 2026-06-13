@@ -5,18 +5,14 @@ from datetime import datetime
 from sqlalchemy import inspect, text
 import great_expectations as gx
 from great_expectations.core.batch import RuntimeBatchRequest
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
+from DATA_Analyst_Assistant_Agent.llm import get_chat_model
 from DATA_Analyst_Assistant_Agent.agents.sql.db.db_schema import get_schema_info
 
 class SemanticHypothesizer:
     """[1단계] 🧠 추론 Layer: 물리 지표 기반 PK 및 FK 후보 선정"""
     def __init__(self):
-        self.llm = ChatOpenAI(
-            model=os.getenv("LLM_MODEL"),
-            api_key=os.getenv("OPENAI_API_KEY"),
-            temperature=0
-        )
+        self.llm = get_chat_model(temperature=0)
 
     def _build_column_stats(self, physical_history):
         column_stats = {}

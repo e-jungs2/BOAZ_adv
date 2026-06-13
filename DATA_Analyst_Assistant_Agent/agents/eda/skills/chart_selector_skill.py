@@ -1,7 +1,7 @@
 import os
 import json
-from langchain_openai import ChatOpenAI
 from dotenv import load_dotenv
+from DATA_Analyst_Assistant_Agent.llm import get_chat_model
 
 load_dotenv()
 
@@ -9,11 +9,7 @@ TOTAL_MAX = 8
 
 
 def _load_llm():
-    return ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
-        temperature=0,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
+    return get_chat_model(temperature=0)
 
 
 def _call_llm_remove(

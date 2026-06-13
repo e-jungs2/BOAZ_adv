@@ -3,7 +3,7 @@ import json
 import datetime 
 from sqlalchemy import inspect
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+from DATA_Analyst_Assistant_Agent.llm import get_chat_model
 from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine, get_table_samples # get_table_samples 추가
 
 # .env 파일 로드
@@ -18,12 +18,12 @@ def enrich_schema_descriptions(engine, schema_data): # engine 인자 추가
     수정 사항: 샘플 데이터 10개를 직접 추출하여 프롬프트에 포함하고, 
     결과 구조에도 sample_data를 추가합니다.
     """
-    model_name = os.getenv("SCHEMA_LLM_MODEL")
+    model_name = os.getenv("SCHEMA_LLM_MODEL") or os.getenv("OPENROUTER_MODEL") or os.getenv("LLM_MODEL")
 
     if not model_name:
         raise ValueError("🚨 .env에 'SCHEMA_LLM_MODEL'이 설정되지 않았습니다.")
 
-    llm = ChatOpenAI(model=model_name)
+    llm = get_chat_model(model=model_name, temperature=0)
     print(f"🤖 {model_name} 모델이 샘플 데이터를 분석 중입니다... (비용 발생)")
 
     for table_name, details in schema_data.items():

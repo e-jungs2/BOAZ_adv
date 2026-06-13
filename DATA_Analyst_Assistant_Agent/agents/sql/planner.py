@@ -13,6 +13,7 @@ from urllib import error, request
 
 from pydantic import BaseModel, Field
 
+from DATA_Analyst_Assistant_Agent.llm import DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, get_model_name
 from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
 
 
@@ -86,7 +87,7 @@ def _build_deterministic_sql_plan(user_query: str, analysis_plan: AnalysisPlan |
 
 
 def _try_build_llm_sql_plan(user_query: str, analysis_plan: AnalysisPlan | None) -> SQLPlan | None:
-    api_key = os.getenv("GOOGLE_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("GOOGLE_API_KEY")
     if not api_key or analysis_plan is None:
         return None
     prompt = _build_llm_system_prompt(
@@ -155,6 +156,42 @@ def _coerce_retry_context(retry_context: dict[str, Any] | None) -> dict[str, Any
 
 
 def _call_llm_planner(*, api_key: str, system_prompt: str, user_query: str) -> str:
+    if os.getenv("OPENROUTER_API_KEY"):
+        return _call_openrouter_planner(api_key=api_key, system_prompt=system_prompt, user_query=user_query)
+    return _call_gemini_planner(api_key=api_key, system_prompt=system_prompt, user_query=user_query)
+
+
+def _call_openrouter_planner(*, api_key: str, system_prompt: str, user_query: str) -> str:
+    endpoint = os.getenv("OPENROUTER_BASE_URL", OPENROUTER_BASE_URL).rstrip("/") + "/chat/completions"
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}",
+    }
+    if os.getenv("OPENROUTER_HTTP_REFERER"):
+        headers["HTTP-Referer"] = os.getenv("OPENROUTER_HTTP_REFERER", "")
+    if os.getenv("OPENROUTER_APP_TITLE"):
+        headers["X-OpenRouter-Title"] = os.getenv("OPENROUTER_APP_TITLE", "")
+    payload = {
+        "model": get_model_name(default=DEFAULT_OPENROUTER_MODEL),
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_query},
+        ],
+        "temperature": 0.1,
+        "response_format": {"type": "json_object"},
+    }
+    req = request.Request(
+        endpoint,
+        data=json.dumps(payload).encode("utf-8"),
+        headers=headers,
+        method="POST",
+    )
+    with request.urlopen(req, timeout=20) as response:
+        body = json.loads(response.read().decode("utf-8"))
+    return _extract_openrouter_response_text(body)
+
+
+def _call_gemini_planner(*, api_key: str, system_prompt: str, user_query: str) -> str:
     model_name = os.getenv("GOOGLE_MODEL", "gemini-2.5-flash")
     endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent"
     payload = {
@@ -170,10 +207,21 @@ def _call_llm_planner(*, api_key: str, system_prompt: str, user_query: str) -> s
     )
     with request.urlopen(req, timeout=20) as response:
         body = json.loads(response.read().decode("utf-8"))
-    return _extract_llm_response_text(body)
+    return _extract_gemini_response_text(body)
 
 
-def _extract_llm_response_text(body: dict[str, Any]) -> str:
+def _extract_openrouter_response_text(body: dict[str, Any]) -> str:
+    choices = body.get("choices") or []
+    if not choices:
+        raise ValueError("LLM response missing choices.")
+    message = (choices[0] or {}).get("message") or {}
+    text = message.get("content") or ""
+    if not str(text).strip():
+        raise ValueError("LLM response missing text payload.")
+    return str(text)
+
+
+def _extract_gemini_response_text(body: dict[str, Any]) -> str:
     candidates = body.get("candidates") or []
     if not candidates:
         raise ValueError("LLM response missing candidates.")

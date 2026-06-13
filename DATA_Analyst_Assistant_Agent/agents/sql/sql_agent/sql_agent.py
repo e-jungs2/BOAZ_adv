@@ -6,14 +6,13 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from langgraph.graph import StateGraph, START, END
-from langchain_google_genai import ChatGoogleGenerativeAI
 
 from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine
 from DATA_Analyst_Assistant_Agent.agents.sql.validator.integrity_loader import load_all_metadata
+from DATA_Analyst_Assistant_Agent.llm import get_chat_model
 
 load_dotenv()
 
-GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 2))
 ALLOWED_MART_SCHEMA = os.getenv("ALLOWED_MART_SCHEMA", "analytics")
 ALLOW_MART_WRITE = os.getenv("ALLOW_MART_WRITE", "true").lower() == "true"
@@ -95,11 +94,7 @@ class AgentState(TypedDict):
 
 engine = get_db_engine()
 
-llm = ChatGoogleGenerativeAI(
-    model="gemini-2.5-flash",
-    temperature=0,
-    google_api_key=GOOGLE_API_KEY
-)
+llm = get_chat_model(temperature=0)
 
 
 # -----------------------------

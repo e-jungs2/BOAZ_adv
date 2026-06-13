@@ -4,11 +4,11 @@ from typing import TypedDict, Any, Dict, List, Optional
 from dotenv import load_dotenv
 import pandas as pd
 
-from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 from langgraph.graph import StateGraph, START, END
 
+from DATA_Analyst_Assistant_Agent.llm import get_chat_model
 from DATA_Analyst_Assistant_Agent.agents.eda.db.db_connect import get_db_engine, load_mart
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.profiling import get_basic_profile
 from DATA_Analyst_Assistant_Agent.agents.eda.skills.data_quality_skill import run_data_quality_skill
@@ -181,11 +181,7 @@ def run_mini_react_with_retry(
     run_mini_react 실행 중 에러 발생 시 에러 내용을 LLM에게 피드백으로 넘겨 재시도한다.
     반환값: (result, error_message or None)
     """
-    llm_feedback = ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
-        temperature=0,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
+    llm_feedback = get_chat_model(temperature=0)
     last_error = None
     current_prompt = system_prompt
 
@@ -221,11 +217,7 @@ def run_mini_react(tools_list: list, system_prompt: str, max_iter: int = 8) -> s
     툴 호출이 없으면 종료하고 최종 텍스트를 반환한다.
     """
     tools_dict = {t.name: t for t in tools_list}
-    node_llm = ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
-        temperature=0,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    ).bind_tools(tools_list)
+    node_llm = get_chat_model(temperature=0).bind_tools(tools_list)
 
     messages = [
         SystemMessage(content=system_prompt),
@@ -266,11 +258,7 @@ def _classify_columns(df: pd.DataFrame, measure_cols: list) -> dict:
 
     sample = df[candidate_cols].head(3).to_dict(orient="list")
 
-    llm = ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
-        temperature=0,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
+    llm = get_chat_model(temperature=0)
     prompt = f"""
 아래 데이터마트의 컬럼 의미를 파악하라.
 
@@ -382,11 +370,7 @@ def planner_node(state: EDAState) -> dict:
 
     row_count = len(_df) if _df is not None else 0
 
-    llm = ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
-        temperature=0,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
+    llm = get_chat_model(temperature=0)
     prompt = f"""
 너는 EDA 분석 전략가다.
 아래 정보를 바탕으로 이번 분석에서 어떤 단계를 어떻게 수행할지 계획을 세워라.
@@ -727,11 +711,7 @@ def insight_node(state: EDAState) -> dict:
 
 한국어로 작성하라.
 """
-    llm = ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
-        temperature=0,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
+    llm = get_chat_model(temperature=0)
     try:
         insight_result = llm.invoke(prompt).content.strip()
         err = None
@@ -817,11 +797,7 @@ H1: ...
 
 한국어로 작성하라.
 """
-    llm = ChatOpenAI(
-        model=os.getenv("LLM_MODEL", "gpt-4o"),
-        temperature=0,
-        api_key=os.getenv("OPENAI_API_KEY"),
-    )
+    llm = get_chat_model(temperature=0)
     hypotheses, err1 = run_node_with_retry(
         lambda: llm.invoke(prompt).content.strip(), "hypothesis", fallback="가설 생성 실패"
     )
