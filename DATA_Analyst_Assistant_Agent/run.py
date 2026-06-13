@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 from DATA_Analyst_Assistant_Agent import BackendAdapter, SQLAgentSupervisor
 from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.config import sql_metadata_dir
 
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -43,7 +44,7 @@ def _normalize_env_aliases() -> None:
 
 
 def _ensure_sql_agent_metadata() -> None:
-    data_dir = ROOT_DIR / "DATA_Analyst_Assistant_Agent" / "agents" / "sql" / "data"
+    data_dir = sql_metadata_dir()
     schema_path = data_dir / "db_schema.json"
     integrity_path = data_dir / "db_integrity_result.json"
     if schema_path.exists() and integrity_path.exists():

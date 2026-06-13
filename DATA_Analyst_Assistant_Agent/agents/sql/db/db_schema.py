@@ -1,17 +1,14 @@
 import os
 import json
-import datetime 
+import datetime
 from sqlalchemy import inspect
-from dotenv import load_dotenv
-from DATA_Analyst_Assistant_Agent.llm import get_chat_model
-from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine, get_table_samples # get_table_samples 추가
+from DATA_Analyst_Assistant_Agent.shared.llm import get_chat_model
+from DATA_Analyst_Assistant_Agent.shared.config import sql_metadata_dir
+from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine, get_table_samples
 
-# .env 파일 로드
-load_dotenv()
-
-SCHEMA_DIR = "data"
-SCHEMA_CACHE_PATH = os.path.join(SCHEMA_DIR, "db_schema.json")
-os.makedirs(SCHEMA_DIR, exist_ok=True)
+# 메타데이터 캐시 경로(패키지 기준, CWD 비의존). .env 로드/별칭 정규화는 shared.config 가 수행.
+SCHEMA_CACHE_PATH = str(sql_metadata_dir() / "db_schema.json")
+sql_metadata_dir().mkdir(parents=True, exist_ok=True)
 
 def enrich_schema_descriptions(engine, schema_data): # engine 인자 추가
     """

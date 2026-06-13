@@ -1,9 +1,9 @@
 import json
 from pathlib import Path
 
+from DATA_Analyst_Assistant_Agent.shared.config import sql_metadata_dir
 
-ROOT_DIR = Path(__file__).resolve().parents[1]   # DATA_Analyst_Assistant_Agent/agents/sql
-DATA_DIR = ROOT_DIR / "data"
+DATA_DIR = sql_metadata_dir()
 
 SCHEMA_JSON_PATH = DATA_DIR / "db_schema.json"
 INTEGRITY_JSON_PATH = DATA_DIR / "db_integrity_result.json"
