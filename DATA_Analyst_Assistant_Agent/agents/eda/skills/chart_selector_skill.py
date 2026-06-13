@@ -1,9 +1,8 @@
 import os
 import json
-from dotenv import load_dotenv
-from DATA_Analyst_Assistant_Agent.llm import get_chat_model
 
-load_dotenv()
+from DATA_Analyst_Assistant_Agent.shared.llm import get_chat_model
+import DATA_Analyst_Assistant_Agent.shared.config  # noqa: F401  (.env 로드 + DB_*/MYSQL_* 별칭 정규화)
 
 TOTAL_MAX = 8
 
