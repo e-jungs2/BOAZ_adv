@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from enum import StrEnum
 from typing import Any
 
-from .common import BackendModel, JsonDict
+from .common import BackendModel, JsonDict, StrEnum
 
 
 class ArtifactType(StrEnum):

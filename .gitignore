@@ -8,6 +8,7 @@ wheels/
 
 # Virtual environments
 .venv
+.venv-langgraph/
 
 # Environment variables files 
 .env
@@ -18,6 +19,11 @@ wheels/
 *.sqlite3
 *.json
 .data_agent/
+.pytest_cache/
+.pytest_tmp/
+.test_data/
 gx/uncommitted/
 
 .DS_Store
+demo_outputs/
+eda_agent/

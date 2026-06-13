@@ -2,11 +2,19 @@ from __future__ import annotations
 
 import csv
 import io
+import sqlite3
 import time
 
-import duckdb
-import sqlglot
-from sqlglot import expressions as exp
+try:
+    import duckdb
+except ModuleNotFoundError:  # pragma: no cover - optional local execution dependency
+    duckdb = None
+try:
+    import sqlglot
+    from sqlglot import expressions as exp
+except ModuleNotFoundError:  # pragma: no cover - optional local execution dependency
+    sqlglot = None
+    exp = None
 
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.artifacts import ArtifactRegisterRequest, ArtifactRef, ArtifactType
@@ -109,11 +117,14 @@ class SQLExecutor:
         blocked = sorted(upper_tokens & BLOCKED_SQL_KEYWORDS)
         if blocked:
             return {"blocked": True, "reason": f"Blocked SQL keyword(s): {', '.join(blocked)}."}
-        try:
-            parsed = sqlglot.parse_one(stripped, read="duckdb")
-        except Exception as exc:
-            return {"blocked": True, "reason": f"SQL parse failed: {exc}"}
-        if not isinstance(parsed, (exp.Select, exp.Union, exp.With)):
+        if sqlglot is not None and exp is not None:
+            try:
+                parsed = sqlglot.parse_one(stripped, read="duckdb")
+            except Exception as exc:
+                return {"blocked": True, "reason": f"SQL parse failed: {exc}"}
+            if not isinstance(parsed, (exp.Select, exp.Union, exp.With)):
+                return {"blocked": True, "reason": "Only read-only SELECT queries are allowed."}
+        elif stripped.lstrip().split()[0].upper() not in {"SELECT", "WITH"}:
             return {"blocked": True, "reason": "Only read-only SELECT queries are allowed."}
         if row_limit <= 0:
             return {"blocked": True, "reason": "row_limit must be positive."}
@@ -122,11 +133,23 @@ class SQLExecutor:
     def _execute_duckdb(self, query: str, row_limit: int) -> tuple[list[tuple], list[str]]:
         wrapped = f"SELECT * FROM ({query.rstrip(';')}) AS data_agent_subquery LIMIT {int(row_limit)}"
         start = time.monotonic()
+        if duckdb is None:
+            return self._execute_sqlite(wrapped)
         con = duckdb.connect(database=":memory:", read_only=False)
         try:
             result = con.execute(wrapped)
             rows = result.fetchall()
             columns = [desc[0] for desc in result.description or []]
+            return rows, columns
+        finally:
+            con.close()
+
+    def _execute_sqlite(self, wrapped_query: str) -> tuple[list[tuple], list[str]]:
+        con = sqlite3.connect(":memory:")
+        try:
+            cur = con.execute(wrapped_query)
+            rows = cur.fetchall()
+            columns = [desc[0] for desc in cur.description or []]
             return rows, columns
         finally:
             con.close()

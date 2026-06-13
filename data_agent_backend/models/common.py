@@ -1,16 +1,25 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import enum
+import sys
+from datetime import datetime, timezone
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict
+
+# Python 3.9/3.10 compat: StrEnum was added in 3.11
+if sys.version_info >= (3, 11):
+    from enum import StrEnum  # noqa: F401
+else:
+    class StrEnum(str, enum.Enum):  # noqa: D101
+        pass
 
 
 JsonDict = dict[str, Any]
 
 
 def utc_now_iso() -> str:
-    return datetime.now(UTC).isoformat()
+    return datetime.now(timezone.utc).isoformat()
 
 
 class BackendModel(BaseModel):
