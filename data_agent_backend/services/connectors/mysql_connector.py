@@ -14,6 +14,7 @@ from data_agent_backend.models.common import BackendError, utc_now_iso
 from data_agent_backend.models.datasource import (
     CatalogSummary,
     ColumnInfo,
+    DatasourceCredential,
     DatasourceRecord,
     TableSummary,
 )
@@ -25,11 +26,19 @@ SAFE_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 class MySQLConnector:
     """Encapsulates MySQL connection, query execution, and catalog introspection."""
 
-    def __init__(self, record: DatasourceRecord, password: str = "") -> None:
+    def __init__(self, record: DatasourceRecord, credential: DatasourceCredential | str | None = None) -> None:
         self._record = record
-        self._password = password
+        if isinstance(credential, str):
+            credential = DatasourceCredential(password=credential)
+        self._credential = credential or DatasourceCredential()
+
+    def _require_password(self) -> str:
+        if not self._credential.password:
+            raise BackendError("CREDENTIAL_REQUIRED", "Datasource password is required for MySQL connections.", {"datasource_id": self._record.datasource_id})
+        return self._credential.password
 
     def _connect(self) -> pymysql.Connection:
+        password = self._require_password()
         if pymysql is None:
             raise BackendError(
                 "DEPENDENCY_MISSING",
@@ -40,7 +49,7 @@ class MySQLConnector:
             host=self._record.host,
             port=self._record.port,
             user=self._record.username,
-            password=self._password,
+            password=password,
             database=self._record.database,
             charset="utf8mb4",
             connect_timeout=10,
@@ -48,12 +57,9 @@ class MySQLConnector:
         )
 
     def test_connection(self) -> bool:
-        try:
-            conn = self._connect()
-            conn.close()
-            return True
-        except Exception:
-            return False
+        conn = self._connect()
+        conn.close()
+        return True
 
     def execute_query(self, query: str, row_limit: int = 1000) -> tuple[list[tuple], list[str]]:
         wrapped = f"SELECT * FROM ({query.rstrip(';')}) AS _daa_sub LIMIT {int(row_limit)}"

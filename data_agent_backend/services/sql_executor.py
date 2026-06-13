@@ -13,6 +13,7 @@ from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.artifacts import ArtifactRegisterRequest, ArtifactRef, ArtifactType
 from data_agent_backend.models.common import BackendError, JsonDict
 from data_agent_backend.models.contexts import PolicyContext
+from data_agent_backend.models.datasource import DatasourceCredential, DatasourceType
 from data_agent_backend.services.artifact_registry import ArtifactRegistry
 from data_agent_backend.services.datasource_service import DatasourceService
 from data_agent_backend.services.policy_engine import PolicyEngine
@@ -56,19 +57,20 @@ class SQLExecutor:
         query: str,
         run_id: str,
         datasource_id: str | None = None,
+        credential: DatasourceCredential | None = None,
         context: PolicyContext | None = None,
         row_limit: int | None = None,
     ) -> ArtifactRef:
         context = context or PolicyContext(run_id=run_id)
-        if not datasource_id:
-            raise BackendError("DATASOURCE_ID_REQUIRED", "datasource_id is required to run SQL analysis.")
-        row_limit = row_limit or self.config.default_sql_row_limit
-        validation = self.validate_sql(query, row_limit)
+        resolved_datasource_id = self.datasource_service.resolve_datasource_id(datasource_id)
+        record = self.datasource_service.get(resolved_datasource_id)
+        row_limit = self.config.default_sql_row_limit if row_limit is None else row_limit
+        validation = self.validate_sql(query, row_limit, record.type)
         decision = self.policy_engine.evaluate(
             "sql.run",
-            datasource_id,
+            resolved_datasource_id,
             {
-                "datasource_id": datasource_id,
+                "datasource_id": resolved_datasource_id,
                 "row_limit": row_limit,
                 "max_row_limit": self.config.max_sql_row_limit_without_approval,
                 **validation,
@@ -87,11 +89,11 @@ class SQLExecutor:
                 created_by_tool=context.tool_name or "sql_run_query",
                 thread_id=context.thread_id,
                 project_id=context.project_id,
-                metadata={"datasource_id": datasource_id, "row_limit": row_limit},
+                metadata={"datasource_id": resolved_datasource_id, "row_limit": row_limit},
             ),
             context,
         )
-        rows, columns, csv_text = self.datasource_service.query_datasource(datasource_id, query, row_limit)
+        rows, columns, csv_text = self.datasource_service.query_datasource(resolved_datasource_id, credential, query, row_limit)
         result_artifact = self.registry.register_artifact(
             ArtifactRegisterRequest(
                 run_id=run_id,
@@ -103,7 +105,7 @@ class SQLExecutor:
                 project_id=context.project_id,
                 parent_ids=[query_artifact.artifact_id],
                 lineage_edge_type="query_result_of",
-                metadata={"datasource_id": datasource_id, "row_limit": row_limit, "returned_rows": len(rows)},
+                metadata={"datasource_id": resolved_datasource_id, "row_limit": row_limit, "returned_rows": len(rows)},
                 preview={"row_count": len(rows), "columns": columns, "sample_rows": [dict(zip(columns, row)) for row in rows[:5]]},
             ),
             context,
@@ -115,14 +117,16 @@ class SQLExecutor:
         query: str,
         run_id: str,
         datasource_id: str | None = None,
+        credential: DatasourceCredential | None = None,
         context: PolicyContext | None = None,
         row_limit: int | None = None,
     ) -> JsonDict:
         context = context or PolicyContext(run_id=run_id, tool_name="db_run_analysis_query")
         context = context.model_copy(update={"run_id": run_id, "tool_name": "db_run_analysis_query"})
         resolved_datasource_id = self.datasource_service.resolve_datasource_id(datasource_id)
+        record = self.datasource_service.get(resolved_datasource_id)
         row_limit = self.config.default_sql_row_limit if row_limit is None else row_limit
-        validation = self.validate_sql(query, row_limit)
+        validation = self.validate_sql(query, row_limit, record.type)
         decision = self.policy_engine.evaluate(
             "sql.run",
             resolved_datasource_id,
@@ -153,7 +157,7 @@ class SQLExecutor:
             context,
         )
         started = perf_counter()
-        rows, columns, csv_text = self.datasource_service.query_datasource(resolved_datasource_id, query, row_limit)
+        rows, columns, csv_text = self.datasource_service.query_datasource(resolved_datasource_id, credential, query, row_limit)
         runtime_ms = int((perf_counter() - started) * 1000)
         preview_rows = [dict(zip(columns, row)) for row in rows[:50]]
         preview = {
@@ -200,7 +204,7 @@ class SQLExecutor:
             "warnings": [],
         }
 
-    def validate_sql(self, query: str, row_limit: int) -> JsonDict:
+    def validate_sql(self, query: str, row_limit: int, datasource_type: DatasourceType | str = DatasourceType.mysql) -> JsonDict:
         stripped = query.strip()
         if not stripped:
             return {"blocked": True, "reason": "SQL query is empty."}
@@ -212,7 +216,7 @@ class SQLExecutor:
             return {"blocked": True, "reason": f"Blocked SQL keyword(s): {', '.join(blocked)}."}
         if sqlglot is not None and exp is not None:
             try:
-                parsed = sqlglot.parse_one(stripped, read="mysql")
+                parsed = sqlglot.parse_one(stripped, read=self._sqlglot_dialect(datasource_type))
             except Exception as exc:
                 return {"blocked": True, "reason": f"SQL parse failed: {exc}"}
             if not isinstance(parsed, (exp.Select, exp.Union, exp.With)):
@@ -228,4 +232,12 @@ class SQLExecutor:
         if ";" not in trimmed:
             return False
         return trimmed.rstrip().rstrip(";").find(";") != -1
+
+    def _sqlglot_dialect(self, datasource_type: DatasourceType | str) -> str:
+        value = datasource_type.value if hasattr(datasource_type, "value") else str(datasource_type)
+        if value == DatasourceType.postgresql.value:
+            return "postgres"
+        if value == DatasourceType.sqlite.value:
+            return "sqlite"
+        return "mysql"
 

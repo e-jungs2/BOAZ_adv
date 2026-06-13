@@ -8,6 +8,7 @@ from data_agent_backend.models.datasource import (
     CatalogSummary,
     ColumnInfo,
     DatasourceCreateRequest,
+    DatasourceCredential,
     DatasourceRecord,
     DatasourceType,
     TableSummary,
@@ -43,7 +44,6 @@ def _register(services, name: str = "analytics_mysql") -> str:
             port=3306,
             database="analytics",
             username="analyst",
-            password="secret",
         )
     )
     return record.datasource_id
@@ -97,20 +97,19 @@ def test_services_isolate_dotenv_mysql_config(tmp_path, monkeypatch) -> None:
     assert services.datasource_service.list_all() == []
 
 
-def test_resolve_datasource_id_requires_registered_datasource(tmp_path, monkeypatch) -> None:
+def test_resolve_datasource_id_requires_explicit_datasource_id(tmp_path, monkeypatch) -> None:
     services = _services(tmp_path, monkeypatch)
 
     with pytest.raises(BackendError) as exc_info:
         services.datasource_service.resolve_datasource_id(None)
 
-    assert exc_info.value.code == "DATASOURCE_REQUIRED"
+    assert exc_info.value.code == "DATASOURCE_ID_REQUIRED"
 
 
-def test_resolve_datasource_id_uses_single_registered_datasource(tmp_path, monkeypatch) -> None:
+def test_resolve_datasource_id_uses_explicit_registered_datasource(tmp_path, monkeypatch) -> None:
     services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
 
-    assert services.datasource_service.resolve_datasource_id(None) == datasource_id
     assert services.datasource_service.resolve_datasource_id(datasource_id) == datasource_id
 
 
@@ -122,7 +121,9 @@ def test_resolve_datasource_id_rejects_explicit_empty_string(tmp_path, monkeypat
         services.datasource_service.resolve_datasource_id("")
 
     assert exc_info.value.code == "NOT_FOUND"
-    assert services.datasource_service.resolve_datasource_id(None) == datasource_id
+    with pytest.raises(BackendError) as missing_info:
+        services.datasource_service.resolve_datasource_id(None)
+    assert missing_info.value.code == "DATASOURCE_ID_REQUIRED"
 
 
 def test_resolve_datasource_id_rejects_ambiguous_default(tmp_path, monkeypatch) -> None:
@@ -136,14 +137,13 @@ def test_resolve_datasource_id_rejects_ambiguous_default(tmp_path, monkeypatch) 
             port=3307,
             database="analytics_2",
             username="analyst",
-            password="secret",
         )
     )
 
     with pytest.raises(BackendError) as exc_info:
         services.datasource_service.resolve_datasource_id(None)
 
-    assert exc_info.value.code == "AMBIGUOUS_DATASOURCE"
+    assert exc_info.value.code == "DATASOURCE_ID_REQUIRED"
 
 
 def test_list_agent_datasources_hides_connection_secrets(tmp_path, monkeypatch) -> None:
@@ -159,7 +159,7 @@ def test_list_agent_datasources_hides_connection_secrets(tmp_path, monkeypatch) 
             "name": "analytics_mysql",
             "type": "mysql",
             "database": "analytics",
-            "is_default": True,
+            "is_default": False,
         }
     ]
     serialized = str(data)
@@ -264,9 +264,10 @@ def test_get_schema_returns_agent_schema_summary(tmp_path, monkeypatch) -> None:
     services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
     fake = FakeConnector()
-    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+    credential = DatasourceCredential(password="secret")
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record, _credential: fake)
 
-    result = services.datasource_service.get_schema(datasource_id)
+    result = services.datasource_service.get_schema(datasource_id, credential)
 
     assert result.datasource_id == datasource_id
     assert result.database == "analytics"
@@ -278,9 +279,10 @@ def test_describe_table_delegates_to_connector(tmp_path, monkeypatch) -> None:
     services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
     fake = FakeConnector()
-    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+    credential = DatasourceCredential(password="secret")
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record, _credential: fake)
 
-    result = services.datasource_service.describe_table(datasource_id, "orders")
+    result = services.datasource_service.describe_table(datasource_id, "orders", credential)
 
     assert fake.describe_calls == ["orders"]
     assert result.table_name == "orders"
@@ -291,9 +293,10 @@ def test_sample_rows_returns_fixed_preview_shape(tmp_path, monkeypatch) -> None:
     services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
     fake = FakeConnector()
-    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+    credential = DatasourceCredential(password="secret")
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record, _credential: fake)
 
-    result = services.datasource_service.sample_rows(datasource_id, "orders", 10)
+    result = services.datasource_service.sample_rows(datasource_id, "orders", 10, credential)
 
     assert fake.sample_calls == [("orders", 10)]
     assert result.columns == ["order_id", "status"]
@@ -302,16 +305,17 @@ def test_sample_rows_returns_fixed_preview_shape(tmp_path, monkeypatch) -> None:
     assert result.truncated is False
 
 
-def test_sample_rows_clamps_explicit_zero_limit_to_one(tmp_path, monkeypatch) -> None:
+def test_sample_rows_rejects_explicit_zero_limit(tmp_path, monkeypatch) -> None:
     services = _services(tmp_path, monkeypatch)
     datasource_id = _register(services)
     fake = FakeConnector()
-    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: fake)
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record, _credential: fake)
 
-    result = services.datasource_service.sample_rows(datasource_id, "orders", 0)
+    with pytest.raises(BackendError) as exc_info:
+        services.datasource_service.sample_rows(datasource_id, "orders", 0, DatasourceCredential(password="secret"))
 
-    assert fake.sample_calls == [("orders", 1)]
-    assert result.limit == 1
+    assert exc_info.value.code == "POLICY_BLOCKED"
+    assert fake.sample_calls == []
 
 
 def test_query_datasource_redacts_connector_exception_details(tmp_path, monkeypatch) -> None:
@@ -322,10 +326,10 @@ def test_query_datasource_redacts_connector_exception_details(tmp_path, monkeypa
         def execute_query(self, query: str, row_limit: int):
             raise RuntimeError("Access denied for user analyst at localhost with password secret")
 
-    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record: FailingConnector())
+    monkeypatch.setattr(services.datasource_service, "_get_connector", lambda _record, _credential: FailingConnector())
 
     with pytest.raises(BackendError) as exc_info:
-        services.datasource_service.query_datasource(datasource_id, "SELECT 1", 10)
+        services.datasource_service.query_datasource(datasource_id, DatasourceCredential(password="secret"), "SELECT 1", 10)
 
     assert exc_info.value.code == "DATASOURCE_QUERY_FAILED"
     serialized_details = str(exc_info.value.details)

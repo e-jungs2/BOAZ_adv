@@ -7,7 +7,7 @@ from data_agent_backend.api.app import create_app
 from data_agent_backend.config import BackendConfig
 from data_agent_backend.models.common import BackendError
 from data_agent_backend.models.contexts import PolicyContext
-from data_agent_backend.models.datasource import DatasourceCreateRequest, DatasourceType
+from data_agent_backend.models.datasource import DatasourceCreateRequest, DatasourceCredential, DatasourceType
 from data_agent_backend.models.policy import PolicyDecision, RiskLevel
 from data_agent_backend.services.factory import create_backend_services
 
@@ -25,7 +25,6 @@ def _register_datasource(services) -> str:
             port=3306,
             database="analytics",
             username="analyst",
-            password="secret",
         )
     )
     return record.datasource_id
@@ -47,8 +46,10 @@ def test_run_sql_query_uses_datasource_service_and_records_metadata(tmp_path, mo
     run = services.run_service.create_run()
     calls = []
 
-    def fake_query_datasource(received_datasource_id: str, query: str, row_limit: int):
-        calls.append((received_datasource_id, query, row_limit))
+    credential = DatasourceCredential(password="secret")
+
+    def fake_query_datasource(received_datasource_id: str, received_credential, query: str, row_limit: int):
+        calls.append((received_datasource_id, received_credential, query, row_limit))
         return [(42,)], ["answer"], "answer\r\n42\r\n"
 
     monkeypatch.setattr(services.datasource_service, "query_datasource", fake_query_datasource)
@@ -57,10 +58,11 @@ def test_run_sql_query_uses_datasource_service_and_records_metadata(tmp_path, mo
         "SELECT 42 AS answer",
         run.run_id,
         datasource_id=datasource_id,
+        credential=credential,
         row_limit=25,
     )
 
-    assert calls == [(datasource_id, "SELECT 42 AS answer", 25)]
+    assert calls == [(datasource_id, credential, "SELECT 42 AS answer", 25)]
     assert not hasattr(services.sql_executor, "_execute_duckdb")
     assert not hasattr(services.sql_executor, "_execute_sqlite")
 
@@ -81,7 +83,7 @@ def test_execution_sql_api_rejects_missing_datasource_id(tmp_path) -> None:
     assert response.status_code == 200
     payload = response.json()
     assert payload["ok"] is False
-    assert payload["error"]["code"] == "DATASOURCE_ID_REQUIRED"
+    assert payload["error"]["code"] == "VALIDATION_ERROR"
 
 
 def test_execution_sql_api_rejects_connection_id_field(tmp_path) -> None:
@@ -105,8 +107,11 @@ def test_run_analysis_query_returns_artifact_envelope(tmp_path, monkeypatch) -> 
     datasource_id = _register_datasource(services)
     run = services.run_service.create_run()
 
-    def fake_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+    credential = DatasourceCredential(password="secret")
+
+    def fake_query_datasource(received_datasource_id: str, received_credential, query: str, row_limit: int):
         assert received_datasource_id == datasource_id
+        assert received_credential == credential
         assert query == "SELECT 42 AS answer"
         assert row_limit == 25
         return [(42,)], ["answer"], "answer\r\n42\r\n"
@@ -117,6 +122,7 @@ def test_run_analysis_query_returns_artifact_envelope(tmp_path, monkeypatch) -> 
         query="SELECT 42 AS answer",
         run_id=run.run_id,
         datasource_id=datasource_id,
+        credential=credential,
         row_limit=25,
     )
 
@@ -139,6 +145,7 @@ def test_run_analysis_query_rejects_blocked_sql(tmp_path) -> None:
             query="DROP TABLE users",
             run_id=run.run_id,
             datasource_id=datasource_id,
+            credential=DatasourceCredential(password="secret"),
         )
 
     assert exc_info.value.code == "POLICY_BLOCKED"
@@ -149,7 +156,7 @@ def test_run_analysis_query_rejects_explicit_zero_row_limit_before_execution(tmp
     datasource_id = _register_datasource(services)
     run = services.run_service.create_run()
 
-    def fail_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+    def fail_query_datasource(received_datasource_id: str, received_credential, query: str, row_limit: int):
         raise AssertionError("query_datasource should not be called for invalid row_limit")
 
     monkeypatch.setattr(services.datasource_service, "query_datasource", fail_query_datasource)
@@ -159,6 +166,7 @@ def test_run_analysis_query_rejects_explicit_zero_row_limit_before_execution(tmp
             "SELECT 1 AS value",
             run.run_id,
             datasource_id=datasource_id,
+            credential=DatasourceCredential(password="secret"),
             row_limit=0,
         )
 
@@ -171,7 +179,7 @@ def test_run_analysis_query_raises_approval_required_before_policy_blocked(tmp_p
     datasource_id = _register_datasource(services)
     run = services.run_service.create_run()
 
-    def fail_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+    def fail_query_datasource(received_datasource_id: str, received_credential, query: str, row_limit: int):
         raise AssertionError("query_datasource should not be called when approval is required")
 
     monkeypatch.setattr(services.datasource_service, "query_datasource", fail_query_datasource)
@@ -181,6 +189,7 @@ def test_run_analysis_query_raises_approval_required_before_policy_blocked(tmp_p
             query="SELECT 1 AS value",
             run_id=run.run_id,
             datasource_id=datasource_id,
+            credential=DatasourceCredential(password="secret"),
             row_limit=11,
         )
 
@@ -204,7 +213,7 @@ def test_run_analysis_query_forces_policy_context_run_id_and_tool_name(tmp_path,
             reason="allowed",
         )
 
-    def fake_query_datasource(received_datasource_id: str, query: str, row_limit: int):
+    def fake_query_datasource(received_datasource_id: str, received_credential, query: str, row_limit: int):
         return [(1,)], ["value"], "value\r\n1\r\n"
 
     monkeypatch.setattr(services.policy_engine, "evaluate", fake_evaluate)
@@ -214,6 +223,7 @@ def test_run_analysis_query_forces_policy_context_run_id_and_tool_name(tmp_path,
         query="SELECT 1 AS value",
         run_id=actual_run.run_id,
         datasource_id=datasource_id,
+        credential=DatasourceCredential(password="secret"),
         context=PolicyContext(run_id=stale_run.run_id, tool_name="some_other_tool"),
     )
 
