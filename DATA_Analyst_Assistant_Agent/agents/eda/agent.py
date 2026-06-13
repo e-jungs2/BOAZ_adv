@@ -9,7 +9,7 @@ from DATA_Analyst_Assistant_Agent.agents.artifact_data import read_sql_result_cs
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
 from DATA_Analyst_Assistant_Agent.agents.eda.profiler import profile_from_csv_artifacts
 from DATA_Analyst_Assistant_Agent.agents.eda.self_check import run_eda_self_check
-from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, OrchestrationState, ValidationBlock
+from DATA_Analyst_Assistant_Agent.shared.contracts import AgentEnvelope, OrchestrationState, ValidationBlock
 
 
 class EDAAgent:

@@ -11,7 +11,7 @@ from pandas.errors import EmptyDataError
 from data_agent_backend.models.artifacts import ArtifactRecord, ArtifactType
 
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
-from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.contracts import OrchestrationState
 
 
 @dataclass

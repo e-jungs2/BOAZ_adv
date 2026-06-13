@@ -13,8 +13,8 @@ from urllib import error, request
 
 from pydantic import BaseModel, Field
 
-from DATA_Analyst_Assistant_Agent.llm import DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, get_model_name
-from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+from DATA_Analyst_Assistant_Agent.shared.llm import DEFAULT_OPENROUTER_MODEL, OPENROUTER_BASE_URL, get_model_name
+from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan
 
 
 class SQLPlan(BaseModel):

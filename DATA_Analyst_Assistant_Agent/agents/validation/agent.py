@@ -8,7 +8,7 @@ from data_agent_backend.models.artifacts import ArtifactType
 from DATA_Analyst_Assistant_Agent.agents.artifact_data import generated_sql_from_artifacts, read_json_artifact, sql_result_artifact_ids
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
 from DATA_Analyst_Assistant_Agent.agents.sql.self_check import is_sql_safe
-from DATA_Analyst_Assistant_Agent.models import (
+from DATA_Analyst_Assistant_Agent.shared.contracts import (
     AgentEnvelope,
     AgentStatus,
     BusinessFlag,

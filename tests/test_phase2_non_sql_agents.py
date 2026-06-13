@@ -16,7 +16,7 @@ from DATA_Analyst_Assistant_Agent.agents.report import ReportAgent
 from DATA_Analyst_Assistant_Agent.agents.validation import CentralValidationAgent
 from DATA_Analyst_Assistant_Agent.agents.visualization.chart_selector import build_chart_config
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
-from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, AnalysisPlan, OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.contracts import AgentEnvelope, AnalysisPlan, OrchestrationState
 
 
 @pytest.fixture()

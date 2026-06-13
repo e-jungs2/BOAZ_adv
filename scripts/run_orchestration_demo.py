@@ -65,7 +65,7 @@ def _ensure_sql_agent_metadata() -> None:
     data_dir.mkdir(parents=True, exist_ok=True)
 
     from sqlalchemy import inspect
-    from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine
+    from DATA_Analyst_Assistant_Agent.shared.db import get_db_engine
 
     engine = get_db_engine()
     if engine is None:

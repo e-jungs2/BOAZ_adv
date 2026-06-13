@@ -15,8 +15,8 @@ from DATA_Analyst_Assistant_Agent.agents import (
     SQLAgent,
     VisualizationAgent,
 )
-from DATA_Analyst_Assistant_Agent.backend_adapter import BackendAdapter
-from DATA_Analyst_Assistant_Agent.models import (
+from DATA_Analyst_Assistant_Agent.shared.backend_adapter import BackendAdapter
+from DATA_Analyst_Assistant_Agent.shared.contracts import (
     AgentEnvelope,
     AgentStatus,
     AnalysisPlan,
@@ -66,7 +66,7 @@ class SQLAgentSupervisor:
         }
         self.graph = None
         if build_runtime_graph:
-            from DATA_Analyst_Assistant_Agent.graph import build_graph
+            from DATA_Analyst_Assistant_Agent.supervisor.graph import build_graph
 
             self.graph = build_graph(adapter, supervisor=self)
 
@@ -98,7 +98,7 @@ class SQLAgentSupervisor:
         try:
             graph = self.graph
             if graph is None:
-                from DATA_Analyst_Assistant_Agent.graph import build_graph
+                from DATA_Analyst_Assistant_Agent.supervisor.graph import build_graph
 
                 graph = build_graph(self.adapter, supervisor=self)
             result = graph.invoke(

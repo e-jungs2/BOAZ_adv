@@ -6,7 +6,7 @@ from sqlalchemy import inspect, text
 import great_expectations as gx
 from great_expectations.core.batch import RuntimeBatchRequest
 from langchain_core.prompts import ChatPromptTemplate
-from DATA_Analyst_Assistant_Agent.llm import get_chat_model
+from DATA_Analyst_Assistant_Agent.shared.llm import get_chat_model
 from DATA_Analyst_Assistant_Agent.agents.sql.db.db_schema import get_schema_info
 
 class SemanticHypothesizer:

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from DATA_Analyst_Assistant_Agent.models import LocalCheck
+from DATA_Analyst_Assistant_Agent.shared.contracts import LocalCheck
 
 
 def run_visualization_self_check(config: dict) -> list[LocalCheck]:

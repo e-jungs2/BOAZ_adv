@@ -4,8 +4,8 @@ from dataclasses import dataclass
 
 from data_agent_backend.models.contexts import PolicyContext
 
-from DATA_Analyst_Assistant_Agent.backend_adapter import BackendAdapter
-from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.backend_adapter import BackendAdapter
+from DATA_Analyst_Assistant_Agent.shared.contracts import OrchestrationState
 
 
 @dataclass

@@ -4,7 +4,7 @@ from DATA_Analyst_Assistant_Agent.agents.artifact_data import generated_sql_from
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
 from DATA_Analyst_Assistant_Agent.agents.report.builder import build_report
 from DATA_Analyst_Assistant_Agent.agents.report.self_check import run_report_self_check
-from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, OrchestrationState, ValidationBlock
+from DATA_Analyst_Assistant_Agent.shared.contracts import AgentEnvelope, OrchestrationState, ValidationBlock
 
 
 class ReportAgent:

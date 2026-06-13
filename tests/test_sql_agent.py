@@ -104,7 +104,7 @@ class TestSQLPlanner:
         assert plan.dimension == "month"
 
     def test_trend_route_uses_cte_template(self):
-        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan
         ap = AnalysisPlan(goal="trend", route_kind="trend", metric="revenue", dimension="월")
         plan = build_sql_plan("월별 매출 추이", ap)
         assert "monthly_data" in plan.generated_sql
@@ -112,7 +112,7 @@ class TestSQLPlanner:
         assert plan.route_kind == "trend"
 
     def test_eda_route_uses_profile_template(self):
-        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan
         ap = AnalysisPlan(goal="eda", route_kind="eda")
         plan = build_sql_plan("데이터 품질 프로파일", ap)
         assert "column_name" in plan.generated_sql
@@ -120,14 +120,14 @@ class TestSQLPlanner:
         assert plan.route_kind == "eda"
 
     def test_comprehensive_route_uses_cte_template(self):
-        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan
         ap = AnalysisPlan(goal="comprehensive", route_kind="comprehensive", metric="revenue", dimension="월")
         plan = build_sql_plan("품질 프로파일하고 월별 매출 분석", ap)
         assert "base_data" in plan.generated_sql
         assert plan.route_kind == "comprehensive"
 
     def test_simple_route_metric_only(self):
-        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan
         ap = AnalysisPlan(goal="simple", route_kind="simple")
         plan = build_sql_plan("매출 요약", ap)
         assert "revenue" in plan.generated_sql
@@ -157,7 +157,7 @@ class TestSQLPlanner:
         assert "unknown column" in prompt
 
     def test_llm_json_response_converts_to_sql_plan(self):
-        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan
 
         ap = AnalysisPlan(goal="simple", route_kind="simple", planner_mode="llm")
         raw = """
@@ -176,7 +176,7 @@ class TestSQLPlanner:
         assert plan.confidence == pytest.approx(0.85)
 
     def test_malformed_llm_json_falls_back_to_deterministic(self, monkeypatch):
-        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan
+        from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan
 
         monkeypatch.setenv("GOOGLE_API_KEY", "test-key")
         monkeypatch.setattr(planner_module, "_call_llm_planner", lambda **kwargs: "{bad json")
@@ -258,7 +258,7 @@ class TestRouteDetection:
 
 class TestSQLAgentIntegration:
     def test_supervisor_parse_plan_transfers_retry_context(self, adapter):
-        from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+        from DATA_Analyst_Assistant_Agent.shared.contracts import OrchestrationState
 
         sup = SQLAgentSupervisor(adapter)
         state = OrchestrationState(run_id=adapter.create_run().run_id, user_query="간단한 매출 요약을 보여줘")
@@ -338,7 +338,7 @@ class TestSQLAgentIntegration:
 
     def test_sql_preview_failure_records_retry_context(self, adapter, monkeypatch):
         from DATA_Analyst_Assistant_Agent.agents.sql.agent import SQLAgent
-        from DATA_Analyst_Assistant_Agent.models import AnalysisPlan, OrchestrationState
+        from DATA_Analyst_Assistant_Agent.shared.contracts import AnalysisPlan, OrchestrationState
 
         monkeypatch.setattr(
             adapter,

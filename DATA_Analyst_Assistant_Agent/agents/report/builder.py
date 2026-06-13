@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.contracts import OrchestrationState
 
 
 def build_report(

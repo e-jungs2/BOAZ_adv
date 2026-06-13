@@ -16,7 +16,7 @@ os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 from dotenv import load_dotenv
 
 from DATA_Analyst_Assistant_Agent import BackendAdapter, SQLAgentSupervisor
-from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.contracts import OrchestrationState
 from DATA_Analyst_Assistant_Agent.shared.config import sql_metadata_dir
 
 
@@ -54,7 +54,7 @@ def _ensure_sql_agent_metadata() -> None:
 
     from sqlalchemy import inspect
 
-    from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine
+    from DATA_Analyst_Assistant_Agent.shared.db import get_db_engine
 
     engine = get_db_engine()
     if engine is None:

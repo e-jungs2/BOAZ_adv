@@ -6,9 +6,9 @@ from DATA_Analyst_Assistant_Agent.agents import (
     SQLAgent,
     VisualizationAgent,
 )
-from DATA_Analyst_Assistant_Agent.backend_adapter import BackendAdapter
-from DATA_Analyst_Assistant_Agent.graph import build_graph
-from DATA_Analyst_Assistant_Agent.models import (
+from DATA_Analyst_Assistant_Agent.shared.backend_adapter import BackendAdapter
+from DATA_Analyst_Assistant_Agent.supervisor.graph import build_graph
+from DATA_Analyst_Assistant_Agent.shared.contracts import (
     AgentEnvelope,
     AgentStatus,
     OrchestrationState,

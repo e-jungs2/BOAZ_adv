@@ -42,7 +42,7 @@ def event_pairs(adapter: BackendAdapter, run_id: str) -> list[tuple[str | None, 
 def test_build_graph_returns_real_compiled_state_graph(adapter: BackendAdapter) -> None:
     from langgraph.graph.state import CompiledStateGraph
 
-    from DATA_Analyst_Assistant_Agent.graph import FallbackCompiledGraph
+    from DATA_Analyst_Assistant_Agent.supervisor.graph import FallbackCompiledGraph
 
     graph = build_graph(adapter)
 

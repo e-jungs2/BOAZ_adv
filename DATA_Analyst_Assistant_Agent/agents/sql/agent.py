@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
-from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, AgentStatus, LocalCheck, OrchestrationState, ValidationBlock
+from DATA_Analyst_Assistant_Agent.shared.contracts import AgentEnvelope, AgentStatus, LocalCheck, OrchestrationState, ValidationBlock
 
 
 class SQLAgent:

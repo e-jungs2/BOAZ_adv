@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any, Optional, TypedDict
 
-from DATA_Analyst_Assistant_Agent.backend_adapter import BackendAdapter
-from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.backend_adapter import BackendAdapter
+from DATA_Analyst_Assistant_Agent.shared.contracts import AgentEnvelope, OrchestrationState
 
 if TYPE_CHECKING:
     from DATA_Analyst_Assistant_Agent.supervisor import SQLAgentSupervisor

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 
-from DATA_Analyst_Assistant_Agent.models import LocalCheck
+from DATA_Analyst_Assistant_Agent.shared.contracts import LocalCheck
 
 _BLOCKED_KEYWORDS: set[str] = {
     "INSERT", "UPDATE", "DELETE", "DROP", "ALTER", "TRUNCATE",

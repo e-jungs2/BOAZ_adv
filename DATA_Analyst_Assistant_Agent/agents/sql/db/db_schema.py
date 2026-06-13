@@ -4,7 +4,7 @@ import datetime
 from sqlalchemy import inspect
 from DATA_Analyst_Assistant_Agent.shared.llm import get_chat_model
 from DATA_Analyst_Assistant_Agent.shared.config import sql_metadata_dir
-from DATA_Analyst_Assistant_Agent.agents.sql.db.db_connect import get_db_engine, get_table_samples
+from DATA_Analyst_Assistant_Agent.shared.db import get_db_engine, get_table_samples
 
 # 메타데이터 캐시 경로(패키지 기준, CWD 비의존). .env 로드/별칭 정규화는 shared.config 가 수행.
 SCHEMA_CACHE_PATH = str(sql_metadata_dir() / "db_schema.json")

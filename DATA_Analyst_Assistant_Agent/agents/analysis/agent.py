@@ -8,7 +8,7 @@ from DATA_Analyst_Assistant_Agent.agents.artifact_data import first_dataframe, r
 from DATA_Analyst_Assistant_Agent.agents.analysis.methods import build_analysis_result
 from DATA_Analyst_Assistant_Agent.agents.analysis.self_check import run_analysis_self_check
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
-from DATA_Analyst_Assistant_Agent.models import AgentEnvelope, OrchestrationState, ValidationBlock
+from DATA_Analyst_Assistant_Agent.shared.contracts import AgentEnvelope, OrchestrationState, ValidationBlock
 
 
 class AnalysisAgent:

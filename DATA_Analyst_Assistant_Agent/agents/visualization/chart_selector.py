@@ -4,7 +4,7 @@ from typing import Any
 
 import pandas as pd
 
-from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.contracts import OrchestrationState
 
 
 def select_chart_type(state: OrchestrationState, dataframe: pd.DataFrame | None = None) -> str:

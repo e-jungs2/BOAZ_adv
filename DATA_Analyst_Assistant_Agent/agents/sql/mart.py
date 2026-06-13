@@ -11,7 +11,7 @@ import re
 from DATA_Analyst_Assistant_Agent.agents.common import AgentRuntime
 from DATA_Analyst_Assistant_Agent.agents.sql.planner import SQLPlan
 from DATA_Analyst_Assistant_Agent.mart.metadata import MartCandidate
-from DATA_Analyst_Assistant_Agent.models import OrchestrationState
+from DATA_Analyst_Assistant_Agent.shared.contracts import OrchestrationState
 
 _MART_KEYWORDS = re.compile(
     r"(반복|재사용|데이터마트|마트|저장|repeat|reusable|datamart|mart|save)",

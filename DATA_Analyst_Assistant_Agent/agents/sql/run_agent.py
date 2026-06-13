@@ -1,4 +1,4 @@
-from DATA_Analyst_Assistant_Agent.agents.sql.sql_agent.sql_agent import build_app
+from DATA_Analyst_Assistant_Agent.agents.sql.graph import build_app
 
 app = build_app()
 
