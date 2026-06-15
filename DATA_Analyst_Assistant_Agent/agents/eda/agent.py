@@ -61,6 +61,7 @@ class EDAAgent:
 
         import pandas as pd
 
+        from DATA_Analyst_Assistant_Agent.agents.eda.skills.clustering_skill import run_clustering_skill
         from DATA_Analyst_Assistant_Agent.agents.eda.skills.comparison_skill import run_comparison_skill
         from DATA_Analyst_Assistant_Agent.agents.eda.skills.data_quality_skill import run_data_quality_skill
         from DATA_Analyst_Assistant_Agent.agents.eda.skills.distribution_skill import run_distribution_skill
@@ -103,5 +104,14 @@ class EDAAgent:
             question_type=state.route_kind,
         )
         result["time_result"] = run_time_skill(df, measure_cols=measure_cols, time_cols=time_cols)
+        try:
+            result["clustering_result"] = run_clustering_skill(
+                df,
+                measure_cols=measure_cols,
+                key_col=key_col,
+                question_type=state.route_kind or "",
+            )
+        except Exception as exc:  # noqa: BLE001 - clustering is best-effort; never break the EDA run
+            result["clustering_result"] = {"skip": True, "reason": f"클러스터링 오류로 스킵: {exc}"}
 
         return result
