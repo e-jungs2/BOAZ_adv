@@ -62,7 +62,48 @@ def run_graph(name: str) -> None:
     print(f"analysis_target: {result.get('analysis_target')}")
     print(f"error_log: {result.get('error_log', [])}")
     print(f"--- final_summary ---\n{result.get('final_summary', '')[:600]}")
+
+    summary_path = _write_run_summary(name, c, result, out_dir)
     print(f"output dir: {visualize.OUTPUT_DIR}")
+    print(f"결과 요약: {summary_path}")
+
+
+def _write_run_summary(name: str, contract, result: dict, out_dir: str) -> str:
+    """mode B 결과(글+차트목록)를 한 곳에 모아 eda_result.md 로 떨군다 (토큰 0)."""
+    import glob
+    import json as _json
+
+    all_dir = os.path.join(out_dir, "all")
+    charts = sorted(os.path.basename(p) for p in glob.glob(os.path.join(all_dir, "*.png")))
+    dl = result.get("data_level", {}) or {}
+    analyses = sorted({e.get("choice") for e in result.get("controller_log", []) if e.get("choice")})
+    caution_lines = [f"- {c}" for c in (result.get("cautions") or [])] or ["- (없음)"]
+    chart_lines = [f"- all/{c}" for c in charts] or ["- (없음)"]
+
+    lines = [
+        f"# EDA 결과 — {name}", "",
+        f"- 질문: {contract.question}",
+        f"- grain: {contract.grain_hint}  /  data_level(자가판정): {dl.get('level')} ({dl.get('confidence')})",
+        f"- 분석 수행: {', '.join(analyses)}",
+        f"- analysis_target: {result.get('analysis_target')}",
+        f"- error_log: {result.get('error_log', [])}", "",
+        "## 해석 주의사항 (cautions)",
+        *caution_lines, "",
+        "## 인사이트", result.get("insight_result", "(없음)"), "",
+        "## 가설", result.get("hypotheses", "(없음)"), "",
+        "## 핸드오프 요약", result.get("final_summary", "(없음)"), "",
+        f"## 차트 ({len(charts)}장, all/ 폴더)",
+        *chart_lines, "",
+        f"## chart_requests 주문서: {len(result.get('chart_requests', []))}개 (chart_requests.json 참고)",
+    ]
+    path = os.path.join(out_dir, "eda_result.md")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    # 구조화 원본도 함께(디버그/하류용)
+    with open(os.path.join(out_dir, "eda_result.json"), "w", encoding="utf-8") as f:
+        _json.dump({k: v for k, v in result.items() if k != "statistical_metadata"},
+                   f, ensure_ascii=False, indent=2, default=str)
+    return path
 
 
 def _report(title: str, result: dict, requests: list) -> None:
