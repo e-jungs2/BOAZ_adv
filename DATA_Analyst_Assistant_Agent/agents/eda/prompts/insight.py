@@ -52,6 +52,8 @@ def insight_prompt(user_question: str, statistical_metadata: Dict[str, Any], all
 데이터에서 직접 관찰되지 않은 원인을 단정하지 마라.
 
 [해석 주의사항]
+- 검증된 수치의 data_level(원본/집계)과 cautions 항목을 반드시 반영하라.
+  집계 데이터면 "개별 관측 수준 해석은 불가" 같은 한계를, sample_reliability에 표본 부족 그룹이 있으면 그 그룹명을 명시하라.
 - 결측치, 이상치, 표본 수 신뢰도 등 구체적 수치와 함께 작성
 - 표본 수가 적어 신뢰도가 낮은 항목은 반드시 명시
 - 한 줄로 간결하게

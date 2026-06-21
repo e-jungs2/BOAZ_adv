@@ -24,12 +24,18 @@ def insight_node(state: EDAState) -> dict:
     df = ctx.df
     measure_cols = ctx.measure_cols
     key_col = ctx.key_col
+    count_col = ctx.count_col
 
     statistical_metadata: Dict[str, Any] = {}
+    data_level: Dict[str, Any] = {}
+    cautions: list = []
     if df is not None:
         from DATA_Analyst_Assistant_Agent.agents.eda.tools.missing import detect_missing
         from DATA_Analyst_Assistant_Agent.agents.eda.tools.outlier import detect_outliers_iqr
         from DATA_Analyst_Assistant_Agent.agents.eda.tools.quality import check_duplicates_fn
+        from DATA_Analyst_Assistant_Agent.agents.eda.tools.reliability import (
+            assess_sample_reliability, build_cautions, detect_data_level,
+        )
 
         numeric_cols = [c for c in (measure_cols or []) if c in df.columns and pd.api.types.is_numeric_dtype(df[c])]
         if not numeric_cols:
@@ -79,10 +85,19 @@ def insight_node(state: EDAState) -> dict:
                 except Exception:
                     pass
 
+        # 데이터 한계 자가점검 (코드, LLM 없음): 원본/집계 판정 + 표본 신뢰도 + 주의사항
+        data_level = detect_data_level(df, key_col=key_col, numeric_cols=numeric_cols)
+        sample_reliability = assess_sample_reliability(
+            df, key_col=key_col, count_col=count_col, data_level=data_level.get("level", "unknown"))
+        cautions = build_cautions(data_level, sample_reliability, corr_pairs)
+
         # clustering_result 가 비어있으면(컨트롤러가 안 돌린 경우) skip 처리
         clustering = state.get("clustering_result") or {}
         statistical_metadata = {
             "row_count":          len(df),
+            "data_level":         data_level,
+            "sample_reliability": sample_reliability,
+            "cautions":           cautions,
             "distribution":       dist_stats,
             "group_comparison":   group_comparison,
             "correlation_pairs":  corr_pairs,
@@ -144,6 +159,8 @@ def insight_node(state: EDAState) -> dict:
     return {
         "insight_result": insight_result,
         "statistical_metadata": statistical_metadata,
+        "data_level": data_level,
+        "cautions": cautions,
         "chart_requests": chart_requests,
         "error_log": append_errors(state, err),
     }

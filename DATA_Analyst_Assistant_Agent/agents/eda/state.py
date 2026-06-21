@@ -52,6 +52,10 @@ class EDAState(TypedDict, total=False):
     # 플래그
     has_time_column: bool
 
+    # 데이터 한계 자가점검 (insight 노드, 코드 기반)
+    data_level: Dict[str, Any]            # {level: raw|aggregated|..., grain_hint, reason}
+    cautions: List[str]                   # 해석 주의사항(집계한계·표본부족·상관≠인과 등)
+
     # 최종 출력
     insight_result: str
     hypotheses: str
