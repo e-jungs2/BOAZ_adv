@@ -31,3 +31,6 @@ eda_agent/
 # Generated EDA chart artifacts (regenerated each run)
 daaa_outputs/
 DATA_Analyst_Assistant_Agent/agents/eda/outputs/
+
+# EDA fixture 입력계약(JSON)은 *.json 전역 무시에서 예외 (fixture는 추적)
+!DATA_Analyst_Assistant_Agent/agents/eda/fixtures/*.contract.json
