@@ -6,6 +6,7 @@ from DATA_Analyst_Assistant_Agent.agents.eda.tools.visualize import (
     plot_bubble,
     plot_radar,
     plot_grouped_bar,
+    plot_crosstab_heatmap,
 )
 
 
@@ -42,6 +43,10 @@ def run_comparison_skill(
         result["bubble"]         = plot_bubble(df, key_col=key_col, measure_cols=measure_cols)
         result["radar"]          = plot_radar(df, key_col=key_col, measure_cols=measure_cols)
         result["grouped_bar"]    = plot_grouped_bar(df, key_col=key_col, measure_cols=measure_cols)
+
+    # 범주 × 범주 교차표 (범주형 2개 이상일 때만 — 함수가 자체 게이트)
+    if qt != "distribution":
+        result["crosstab"] = plot_crosstab_heatmap(df, cat_a=key_col)
 
     result["chart_requests"] = from_comparison_skill(result, key_col=key_col, measure_cols=measure_cols)
     return result

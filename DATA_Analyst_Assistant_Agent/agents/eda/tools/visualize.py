@@ -971,12 +971,18 @@ def plot_multiline_timeseries(df: pd.DataFrame, time_col: str = None, key_col: s
 def plot_crosstab_heatmap(df: pd.DataFrame, cat_a: str = None, cat_b: str = None,
                           max_card: int = 15, max_overall_card: int = 50) -> dict:
     """두 범주형 변수의 교차 빈도 히트맵 — 범주 × 범주."""
-    cats = [c for c in df.select_dtypes(include=["object"]).columns
-            if df[c].nunique() <= max_overall_card]
-    if cat_a is None or cat_b is None:
-        if len(cats) < 2:
+    all_cats = list(df.select_dtypes(include=["object"]).columns)
+    # cat_a가 명시되면 카디널리티 무관하게 사용(상위 N개만 표시하므로). 미지정 시 저카디널리티 우선.
+    if cat_a is None:
+        low = [c for c in all_cats if df[c].nunique() <= max_overall_card]
+        if len(low) < 2:
             return {"chart_paths": [], "stats": {}, "skipped": "범주형 컬럼 2개 미만 — 교차 불가"}
-        cat_a, cat_b = cats[0], cats[1]
+        cat_a, cat_b = low[0], low[1]
+    elif cat_b is None:
+        others = [c for c in all_cats if c != cat_a]
+        if not others:
+            return {"chart_paths": [], "stats": {}, "skipped": "교차할 두 번째 범주형 컬럼 없음"}
+        cat_b = min(others, key=lambda c: df[c].nunique())  # 가장 저카디널리티 짝
     if cat_a not in df.columns or cat_b not in df.columns:
         return {"chart_paths": [], "stats": {}, "skipped": "지정 범주 컬럼 없음"}
 

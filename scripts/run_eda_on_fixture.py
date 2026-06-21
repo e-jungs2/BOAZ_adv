@@ -25,6 +25,46 @@ from DATA_Analyst_Assistant_Agent.agents.eda.tools.reliability import assess_sam
 FIXTURES = ["f1_order_level", "f2_category_level", "f3_category_month"]
 
 
+def run_graph(name: str) -> None:
+    """모드 B — fixture를 진짜 EDA LangGraph에 통과시킨다. ⚠️ LLM(OpenRouter) 호출 발생."""
+    from DATA_Analyst_Assistant_Agent.agents.eda._runtime import EdaContext, reset_context, set_context
+    from DATA_Analyst_Assistant_Agent.agents.eda.graph import build_app
+
+    df, c = load_fixture(name)
+    out_dir = os.path.join(_REPO_ROOT, "daaa_outputs", "fixture_preview", name + "_graph")
+    visualize.set_output_dirs(out_dir)
+
+    target = c.target_candidates[0] if c.target_candidates else None
+    reset_context()
+    set_context(EdaContext(
+        df=df, key_col=c.key_col, measure_cols=c.numeric, time_cols=c.datetime,
+        count_col=c.count, target_col=target, question_type=c.question_type))
+
+    print(f"\n========== [GRAPH/LLM] {name} ==========")
+    app = build_app()
+    try:
+        result = app.invoke({
+            "user_question": c.question,
+            "target_table": "",
+            "mart_design": {},
+            "question_type": c.question_type,
+            "plan_metric": target or "",
+            "plan_dimension": c.key_col or "",
+            "error_log": [],
+        })
+    finally:
+        reset_context()
+
+    print(f"completed_analyses: {sorted({e.get('choice') for e in result.get('controller_log', []) if e.get('choice')})}")
+    print(f"key_charts({len(result.get('key_charts', []))}): {[os.path.basename(p) for p in result.get('key_charts', [])]}")
+    print(f"chart_requests: {len(result.get('chart_requests', []))}개")
+    print(f"data_level: {result.get('data_level', {}).get('level')} | cautions: {len(result.get('cautions', []))}개")
+    print(f"analysis_target: {result.get('analysis_target')}")
+    print(f"error_log: {result.get('error_log', [])}")
+    print(f"--- final_summary ---\n{result.get('final_summary', '')[:600]}")
+    print(f"output dir: {visualize.OUTPUT_DIR}")
+
+
 def _report(title: str, result: dict, requests: list) -> None:
     paths = result.get("chart_paths") or ([result["chart_path"]] if result.get("chart_path") else [])
     if not paths:
@@ -72,6 +112,13 @@ def run_one(name: str) -> None:
 
 def main() -> None:
     arg = sys.argv[1] if len(sys.argv) > 1 else "all"
+    mode = sys.argv[2] if len(sys.argv) > 2 else "code"
+
+    if mode == "graph":  # 모드 B — 진짜 EDA 그래프(LLM)
+        run_graph(arg if arg != "all" else "f1_order_level")
+        print("\nDONE (graph/LLM)")
+        return
+
     names = FIXTURES if arg == "all" else [arg]
     for n in names:
         run_one(n)

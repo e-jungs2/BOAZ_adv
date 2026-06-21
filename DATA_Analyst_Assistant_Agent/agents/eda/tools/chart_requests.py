@@ -43,6 +43,14 @@ def from_distribution_skill(result: dict) -> List[dict]:
     for col, st in ((result.get("category_distribution") or {}).get("stats") or {}).items():
         out.append(_req(f"{col}의 범주별 빈도 분포(상위 항목)", {col: {"type": "categorical"}}, st, "bar"))
 
+    # 다변수 교차(원본 데이터에서만 발화)
+    gb = result.get("grouped_box") or {}
+    if gb.get("stats"):
+        out += from_grouped_box(gb, gb.get("key_col"))
+    dbt = result.get("dist_by_target") or {}
+    if dbt.get("stats"):
+        out += from_distribution_by_target(dbt)
+
     return out
 
 
@@ -108,6 +116,10 @@ def from_comparison_skill(result: dict, key_col: Optional[str] = None,
                 cols[v] = {"type": "numeric"}
         out.append(_req(f"{kc}의 다지표 포지셔닝을 버블차트로", cols, bubble_stats, "scatter"))
 
+    ct = result.get("crosstab") or {}
+    if ct.get("stats"):
+        out += from_crosstab(ct)
+
     return out
 
 
@@ -125,6 +137,10 @@ def from_time_skill(result: dict, time_cols: Optional[list] = None) -> List[dict
 
     for key, st in ((result.get("seasonality") or {}).get("stats") or {}).items():
         out.append(_req(f"{key} 기준 시즌성을 막대로", {tcol: {"type": "temporal"}}, st, "bar"))
+
+    ml = result.get("multiline") or {}
+    if ml.get("stats"):
+        out += from_multiline(ml)
 
     return out
 

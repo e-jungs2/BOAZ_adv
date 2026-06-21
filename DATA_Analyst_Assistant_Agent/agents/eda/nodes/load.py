@@ -83,6 +83,20 @@ def load_mart_node(state: EDAState) -> dict:
     if df is None or df.empty:
         raise RuntimeError("EDA: 분석할 DataFrame이 비어 있습니다 (CSV 아티팩트 없음).")
 
+    # 입력계약(fixture/향후 SQL)이 컬럼 역할을 미리 채워뒀으면 LLM 분류를 건너뛴다(토큰 절감).
+    if ctx.measure_cols and ctx.key_col:
+        obvious_time = [c for c in df.columns if "datetime" in str(df[c].dtype)]
+        ctx.time_cols = ctx.time_cols or obvious_time
+        ctx.count_col = ctx.count_col or ""
+        ctx.question_type = state.get("question_type", "") or ctx.question_type
+        ctx.priority_metrics = []
+        return {
+            "time_columns":    ctx.time_cols,
+            "count_column":    ctx.count_col,
+            "has_time_column": len(ctx.time_cols) > 0,
+            "error_log":       [],
+        }
+
     mart_design = state.get("mart_design", {}) or {}
     key_columns    = mart_design.get("key_columns", [])
     dimension_cols = mart_design.get("dimension_columns", [])
@@ -108,6 +122,9 @@ def load_mart_node(state: EDAState) -> dict:
     ctx.measure_cols  = measure_cols
     ctx.time_cols     = col_meta["time_columns"]
     ctx.count_col     = col_meta["count_column"]
+    # target: 앞단 plan_metric이 실제 컬럼이면 채택(대개 None — 그땐 가설 노드가 priority로 폴백)
+    pm = state.get("plan_metric")
+    ctx.target_col    = pm if (pm and pm in df.columns) else None
     ctx.question_type = state.get("question_type", "")
     ctx.priority_metrics = []  # planner 실행 후 갱신됨
 

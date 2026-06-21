@@ -5,6 +5,8 @@ from DATA_Analyst_Assistant_Agent.agents.eda.tools.visualize import (
     plot_boxplots,
     plot_violins,
     plot_category_distribution,
+    plot_grouped_box,
+    plot_distribution_by_target,
 )
 
 
@@ -13,6 +15,8 @@ def run_distribution_skill(
     measure_cols: list = None,
     question_type: str = "",
     priority_metrics: list = None,
+    key_col: str = None,
+    target_col: str = None,
 ) -> dict:
     """
     단변량 분포 분석 skill.
@@ -43,6 +47,11 @@ def run_distribution_skill(
         result["boxplots"]              = plot_boxplots(df, measure_cols=measure_cols)
         result["violins"]               = plot_violins(df, measure_cols=measure_cols)
         result["category_distribution"] = plot_category_distribution(df)
+
+    # 다변수 교차: 범주별 분포 + target 수준별 분포 (원본 데이터에서만 발화 — 함수가 자체 게이트)
+    result["grouped_box"] = plot_grouped_box(df, key_col=key_col, measure_cols=measure_cols)
+    if target_col:
+        result["dist_by_target"] = plot_distribution_by_target(df, target_col=target_col, measure_cols=measure_cols)
 
     result["chart_requests"] = from_distribution_skill(result)
     return result
