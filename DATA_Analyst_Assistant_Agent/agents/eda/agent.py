@@ -77,6 +77,11 @@ class EDAAgent:
         # 원본 모듈 전역(_df 등)을 대체하는 실행 컨텍스트. df 만 채우고
         # key/measure/time 컬럼은 load_mart 노드가 확정한다.
         set_context(EdaContext(df=df, question_type=state.route_kind or ""))
+        # 앞단이 넘긴 의미 힌트를 EDA로 전달(있으면 줍고 없으면 폴백). 현재 supervisor는
+        # "매출"/"월"/None 수준이라 대개 비어 옴 → 가설 노드가 priority_metrics로 폴백한다.
+        plan = state.plan
+        plan_metric = (plan.metric if plan and plan.metric else "") or ""
+        plan_dimension = (plan.dimension if plan and plan.dimension else "") or ""
         try:
             app = build_app()
             result = app.invoke(
@@ -85,6 +90,8 @@ class EDAAgent:
                     "target_table": "",
                     "mart_design": {},
                     "question_type": state.route_kind or "",
+                    "plan_metric": plan_metric,
+                    "plan_dimension": plan_dimension,
                     "error_log": [],
                 }
             )

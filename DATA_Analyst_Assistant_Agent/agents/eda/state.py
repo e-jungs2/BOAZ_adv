@@ -17,6 +17,12 @@ class EDAState(TypedDict, total=False):
     mart_design: Dict[str, Any] # grain, key_columns, measure_columns
     question_type: str          # "comparison" | "distribution" | "relationship" | "time"
 
+    # 앞단(supervisor/SQL)이 넘긴 의미 힌트 (없거나 컬럼명이 아닐 수 있음 → 폴백 필요).
+    # ※ 현재 supervisor는 "매출"/"월" 같은 자연어/None으로만 채움(state.plan). 컬럼명 보장 X.
+    plan_metric: str            # 분석 대상(target) 후보 힌트
+    plan_dimension: str         # 그룹/단위(dimension) 힌트
+    analysis_target: str        # 실제 df 컬럼으로 확정된 target (가설 6유형 앵커)
+
     # planner 결정 (하위호환 — 컨트롤러가 priority_metrics/focus를 여기 보관)
     analysis_plan: Dict[str, Any]
 

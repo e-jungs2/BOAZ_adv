@@ -24,11 +24,18 @@ _TYPE_GUIDE_BLOCK = """
 
 
 def hypothesis_prompt(user_question: str, insight_result: str,
-                      include_type_guide: bool = HYPOTHESIS_TYPE_GUIDE) -> str:
+                      include_type_guide: bool = HYPOTHESIS_TYPE_GUIDE,
+                      target_hint: str = "") -> str:
     type_field = "유형: (회귀/분류/관계추론/그룹차이/군집/시계열 중 하나 — 아래 판별표 기준)\n" if include_type_guide else ""
     type_guide = _TYPE_GUIDE_BLOCK if include_type_guide else ""
     labels_note = "관찰:, 유형:, H0:, H1:, 검증방법:, 필요변수:, 현재데이터:" if include_type_guide \
         else "관찰:, H0:, H1:, 검증방법:, 필요변수:, 현재데이터:"
+    target_block = (
+        f"\n[분석 대상(target) 후보] {target_hint}\n"
+        "이 변수를 기본 target으로 두고 유형/검증방법을 정하라. "
+        "인사이트상 더 적합한 target이 있으면 바꿔도 되지만, 근거를 관찰에 적어라.\n"
+        if target_hint else ""
+    )
 
     return f"""
 너는 데이터 분석 가설 설계자다. 네 가설은 다음 단계의 분석 에이전트(통계 검정, 모델링 수행)가 바로 실행할 수 있는 수준이어야 한다.
@@ -38,7 +45,7 @@ def hypothesis_prompt(user_question: str, insight_result: str,
 
 [핵심 인사이트 및 구조 해석]
 {insight_result}
-{type_guide}
+{target_block}{type_guide}
 위 인사이트를 바탕으로 아래 형식으로 작성하라.
 마크다운 기호(###, **, * 등)는 절대 사용하지 마라. 일반 텍스트로만 작성하라.
 

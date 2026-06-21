@@ -2,15 +2,36 @@
 
 from __future__ import annotations
 
-from DATA_Analyst_Assistant_Agent.agents.eda._runtime import append_errors, get_llm
+from DATA_Analyst_Assistant_Agent.agents.eda._runtime import append_errors, get_context, get_llm
 from DATA_Analyst_Assistant_Agent.agents.eda.nodes.react import run_node_with_retry
 from DATA_Analyst_Assistant_Agent.agents.eda.prompts import handoff_summary_prompt, hypothesis_prompt
 from DATA_Analyst_Assistant_Agent.agents.eda.state import EDAState
 
 
+def _resolve_target(state: EDAState) -> str:
+    """가설 6유형의 앵커가 될 target 컬럼을 확정한다(LLM 없음).
+    우선순위: 앞단 plan_metric → planner의 priority_metrics → measure_cols.
+    실제 df 컬럼인 것만 채택하고, 하나도 못 찾으면 ""(가설 노드가 인사이트로 추론)."""
+    ctx = get_context()
+    df = getattr(ctx, "df", None)
+    cols = set(df.columns) if df is not None else set()
+
+    candidates = []
+    if state.get("plan_metric"):
+        candidates.append(state["plan_metric"])
+    candidates += list(state.get("analysis_plan", {}).get("priority_metrics", []) or [])
+    candidates += list(getattr(ctx, "measure_cols", None) or [])
+
+    for c in candidates:
+        if c and c in cols:
+            return c
+    return ""
+
+
 def hypothesis_node(state: EDAState) -> dict:
     llm = get_llm()
-    prompt = hypothesis_prompt(state["user_question"], state.get("insight_result", ""))
+    target = _resolve_target(state)
+    prompt = hypothesis_prompt(state["user_question"], state.get("insight_result", ""), target_hint=target)
     fb = state.get("validation_feedback")
     if fb:
         prompt += f"\n[직전 검증 지적 — 반드시 보완하라]\n{fb}\n"
@@ -25,5 +46,6 @@ def hypothesis_node(state: EDAState) -> dict:
     return {
         "hypotheses": hypotheses,
         "final_summary": final_summary,
+        "analysis_target": target,
         "error_log": append_errors(state, err1, err2),
     }
