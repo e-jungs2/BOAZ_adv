@@ -7,8 +7,8 @@ import os
 import shutil
 
 from DATA_Analyst_Assistant_Agent.agents.eda.state import EDAState
+from DATA_Analyst_Assistant_Agent.agents.eda.tools import visualize  # OUTPUT_DIR/KEY_DIR 동적 반영(set_output_dirs)
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.skills.chart_selector_skill import run_chart_selector_skill
-from DATA_Analyst_Assistant_Agent.agents.eda.tools.visualize import KEY_DIR, OUTPUT_DIR
 
 try:  # 제공자에 따라 openai 예외가 없을 수 있어 방어적으로 import
     from openai import RateLimitError
@@ -18,7 +18,7 @@ except Exception:  # noqa: BLE001
 
 
 def chart_selector_node(state: EDAState) -> dict:
-    all_charts = sorted(glob.glob(os.path.join(OUTPUT_DIR, "*.png")))
+    all_charts = sorted(glob.glob(os.path.join(visualize.OUTPUT_DIR, "*.png")))
     if not all_charts:
         return {"key_charts": []}
 
@@ -52,10 +52,10 @@ def chart_selector_node(state: EDAState) -> dict:
         key_charts = _run(truncated, slim_stat)
 
     # key/ 폴더 초기화 후 선별 차트 복사
-    for f in glob.glob(os.path.join(KEY_DIR, "*.png")):
+    for f in glob.glob(os.path.join(visualize.KEY_DIR, "*.png")):
         os.remove(f)
     for src in key_charts:
         if os.path.exists(src):
-            shutil.copy(src, os.path.join(KEY_DIR, os.path.basename(src)))
+            shutil.copy(src, os.path.join(visualize.KEY_DIR, os.path.basename(src)))
 
     return {"key_charts": key_charts}
