@@ -27,3 +27,7 @@ gx/uncommitted/
 .DS_Store
 demo_outputs/
 eda_agent/
+
+# Generated EDA chart artifacts (regenerated each run)
+daaa_outputs/
+DATA_Analyst_Assistant_Agent/agents/eda/outputs/

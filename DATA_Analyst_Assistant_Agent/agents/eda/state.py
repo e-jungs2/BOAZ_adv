@@ -1,0 +1,57 @@
+"""EDA 에이전트의 상태/IO 모델.
+
+원본 `eda_agent/eda_agent.py` 의 LangGraph `EDAState` 를 분리한 것.
+DataFrame 등 런타임 객체는 state 에 싣지 않고 `_runtime.EdaContext` 가 보유한다
+(원본의 모듈 전역 `_df` 를 대체).
+"""
+
+from __future__ import annotations
+
+from typing import Any, Dict, List, TypedDict
+
+
+class EDAState(TypedDict, total=False):
+    # 입력 인터페이스 (SQL Agent → EDA Agent)
+    user_question: str          # 사용자 원본 질문
+    target_table: str           # "sql_agent.{mart_name}" (현재는 참고용, 데이터는 CSV 아티팩트로 진입)
+    mart_design: Dict[str, Any] # grain, key_columns, measure_columns
+    question_type: str          # "comparison" | "distribution" | "relationship" | "time"
+
+    # planner 결정 (하위호환 — 컨트롤러가 priority_metrics/focus를 여기 보관)
+    analysis_plan: Dict[str, Any]
+
+    # 컨트롤러(플래너) 루프 상태
+    round: int                       # 현재 라운드 (0부터)
+    next_analysis: str               # 플래너가 고른 다음 분석 ("done" 가능)
+    controller_log: List[Dict[str, Any]]  # [{round, choice, reason}] 결정 추적
+
+    # validator(자기검증) 상태
+    validation_result: Dict[str, Any]     # {status, retry_target, reason, feedback}
+    validation_retries: int               # 검증 재시도 횟수
+    validation_feedback: str              # 재시도 대상 노드에 전달할 보완 지시
+
+    # 각 노드 결과
+    inspect_result: str
+    quality_result: str
+    distribution_result: str
+    comparison_result: str
+    relationship_result: str
+    time_result: str
+    clustering_result: Dict[str, Any]
+
+    # 컬럼 의미 분류 (LLM이 로드 직후 판단)
+    time_columns: List[str]    # 시간/날짜 컬럼
+    count_column: str          # 표본 수/볼륨 컬럼 (없으면 "")
+
+    # 플래그
+    has_time_column: bool
+
+    # 최종 출력
+    insight_result: str
+    hypotheses: str
+    final_summary: str
+    key_charts: List[str]
+    statistical_metadata: Dict[str, Any]  # downstream 에이전트용 raw 수치
+
+    # 에러 로그
+    error_log: List[str]

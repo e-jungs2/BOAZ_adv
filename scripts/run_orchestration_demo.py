@@ -446,6 +446,14 @@ def _chart_title(filename: str) -> str:
 
 
 def _select_eda_charts(columns: list[str], *, limit: int = 8) -> list[Path]:
+    # EDA 의 chart_selector 가 선별해 둔 outputs/key 를 우선 사용한다 (EDA의 실제 차트 선택).
+    key_dir = ROOT_DIR / "DATA_Analyst_Assistant_Agent" / "agents" / "eda" / "outputs" / "key"
+    if key_dir.exists():
+        key_charts = sorted(key_dir.glob("*.png"))
+        if key_charts:
+            return key_charts[:limit]
+
+    # 폴백: outputs/key 가 비어 있으면 기존 점수 기반 선택 (outputs/all)
     charts_dir = ROOT_DIR / "DATA_Analyst_Assistant_Agent" / "agents" / "eda" / "outputs" / "all"
     if not charts_dir.exists():
         return []
