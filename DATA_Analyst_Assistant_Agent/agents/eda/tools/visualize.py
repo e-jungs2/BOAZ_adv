@@ -762,3 +762,79 @@ def plot_cluster_scatter(df: pd.DataFrame, x_col: str, y_col: str, cluster_col: 
     fig.savefig(path, bbox_inches="tight", dpi=120)
     plt.close(fig)
     return {"chart_paths": [path]}
+
+
+# ─────────────────────────────
+# 그룹별 분포 (범주 × 수치, 다변수 교차)
+# ─────────────────────────────
+
+def plot_grouped_box(df: pd.DataFrame, key_col: str = None, measure_cols: list = None,
+                     top_n: int = 10, min_rows_per_group: int = 5) -> dict:
+    """카테고리별 수치형 '분포'를 그룹 박스플롯으로 비교.
+
+    평균 막대가 숨기는 것(분산·이상치)을 드러낸다. 그룹당 행이 여러 개인 원본(raw)
+    데이터에서만 의미가 있으므로, 그룹당 1행(집계본)이면 그릴 게 없어 스킵한다.
+    """
+    cat_cols = list(df.select_dtypes(include=["object"]).columns)
+    numeric_cols = _get_numeric_cols(df, measure_cols)
+    if key_col is None or key_col not in df.columns:
+        key_col = cat_cols[0] if cat_cols else None
+    if key_col is None or not numeric_cols:
+        return {"chart_paths": [], "stats": {}}
+
+    # feasibility: 그룹당 행이 사실상 1개면(집계본) 분포 비교 불가
+    sizes = df.groupby(key_col).size()
+    if float(sizes.median()) < 2:
+        return {"chart_paths": [], "stats": {},
+                "skipped": f"{key_col} 그룹당 행이 1개뿐(집계본) — 분포 비교 불가"}
+
+    # 표본 충분한 그룹 중 행수 상위 top_n
+    valid = sizes[sizes >= min_rows_per_group]
+    if valid.empty:
+        return {"chart_paths": [], "stats": {},
+                "skipped": f"그룹별 표본이 모두 {min_rows_per_group} 미만 — 분포 비교 부적합"}
+    top_cats = valid.nlargest(top_n).index.tolist()
+
+    paths, stats = [], {}
+    for metric in numeric_cols:
+        groups, labels, per = [], [], {}
+        for cat in top_cats:
+            s = df.loc[df[key_col] == cat, metric].dropna()
+            if len(s) < min_rows_per_group:
+                continue
+            q1, q3 = float(s.quantile(0.25)), float(s.quantile(0.75))
+            groups.append(s.values)
+            labels.append(str(cat)[:18])
+            per[str(cat)] = {"median": round(float(s.median()), 2), "q1": round(q1, 2),
+                             "q3": round(q3, 2), "iqr": round(q3 - q1, 2), "n": int(len(s))}
+        if not groups:
+            continue
+
+        colors = sns.color_palette(PALETTE_SEQ, len(groups))[::-1]
+        fig, ax = plt.subplots(figsize=(max(8, len(groups) * 0.85), 5))
+        bp = ax.boxplot(groups, vert=True, patch_artist=True, showfliers=True,
+                        medianprops=dict(color=PALETTE_ACCENT, linewidth=2),
+                        flierprops=dict(marker="o", markersize=3, alpha=0.4, markerfacecolor=PALETTE_NEG,
+                                        markeredgecolor="none"))
+        for patch, color in zip(bp["boxes"], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.75)
+            patch.set_edgecolor("white")
+        ax.set_xticks(range(1, len(labels) + 1))
+        ax.set_xticklabels(labels, rotation=35, ha="right", fontsize=8)
+        _apply_style(ax, f"{metric} distribution by {key_col} (top {len(groups)})", ylabel=metric)
+        ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+        fig.tight_layout()
+        path = os.path.join(OUTPUT_DIR, f"groupedbox_{metric}.png")
+        fig.savefig(path, bbox_inches="tight", dpi=120)
+        plt.close(fig)
+        paths.append(path)
+
+        widest = max(per.items(), key=lambda kv: kv[1]["iqr"]) if per else None
+        stats[metric] = {
+            "by_group": per,
+            "widest_spread_group": widest[0] if widest else None,
+            "note": (f"{widest[0]} 그룹의 산포(IQR={widest[1]['iqr']})가 가장 큼 — 평균만으론 안 보이는 편차"
+                     if widest else ""),
+        }
+    return {"chart_paths": paths, "stats": stats}

@@ -65,6 +65,9 @@ def load_fixture(name: str) -> Tuple[pd.DataFrame, EdaInput]:
     csv_path = os.path.join(FIXTURE_DIR, f"{name}.csv")
     json_path = os.path.join(FIXTURE_DIR, f"{name}.contract.json")
     df = pd.read_csv(csv_path)
+    # 방어: 문자열 컬럼의 잔여 공백/\r 정리(원본 olist 범주값 오염 대비)
+    for col in df.select_dtypes(include=["object"]).columns:
+        df[col] = df[col].str.strip()
     # datetime 컬럼 파싱
     with open(json_path, "r", encoding="utf-8") as f:
         contract = EdaInput.from_dict(json.load(f))

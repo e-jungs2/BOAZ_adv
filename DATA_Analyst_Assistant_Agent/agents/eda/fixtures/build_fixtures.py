@@ -151,6 +151,9 @@ def main() -> None:
     with engine.connect() as conn:
         for name, spec in FIXTURES.items():
             df = pd.read_sql(text(spec["query"]), conn)
+            # 원본 olist는 범주값에 \r(윈도우 줄바꿈)이 섞여 있음 → 문자열 컬럼 정리
+            for col in df.select_dtypes(include=["object"]).columns:
+                df[col] = df[col].str.strip()
             csv_path = os.path.join(FIXTURE_DIR, f"{name}.csv")
             json_path = os.path.join(FIXTURE_DIR, f"{name}.contract.json")
             df.to_csv(csv_path, index=False, encoding="utf-8")

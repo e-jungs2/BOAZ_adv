@@ -130,6 +130,22 @@ def from_time_skill(result: dict, time_cols: Optional[list] = None) -> List[dict
 
 
 # ─────────────────────────────
+# 그룹별 분포 (범주 × 수치, 다변수 교차)
+# ─────────────────────────────
+def from_grouped_box(result: dict, key_col: str) -> List[dict]:
+    """카테고리별 수치 분포(그룹 박스플롯) 주문서. 원본 데이터에서만 발행된다."""
+    out: List[dict] = []
+    kc = key_col or "category"
+    for metric, st in (result.get("stats") or {}).items():
+        out.append(_req(
+            f"{kc}별 {metric} 분포를 그룹 박스플롯으로 비교(평균이 숨기는 산포·이상치 확인)",
+            {kc: {"type": "categorical"}, metric: {"type": "numeric"}},
+            st, "grouped_box",
+        ))
+    return out
+
+
+# ─────────────────────────────
 # clustering skill
 # ─────────────────────────────
 def from_clustering_skill(result: dict) -> List[dict]:
