@@ -13,7 +13,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from DATA_Analyst_Assistant_Agent.agents.eda._runtime import get_llm, safe_json_parse
+from DATA_Analyst_Assistant_Agent.agents.eda._runtime import get_context, get_llm, safe_json_parse
 from DATA_Analyst_Assistant_Agent.agents.eda.prompts import validator_prompt
 from DATA_Analyst_Assistant_Agent.agents.eda.state import EDAState
 
@@ -40,6 +40,29 @@ def _deterministic_fail(state: EDAState):
     if not state.get("statistical_metadata"):
         return "planner", "통계 메타데이터가 비어있음"
     return None
+
+
+def _check_chart_requests(state: EDAState) -> list:
+    """차트 주문서를 코드로 검증한다(LLM 없음): 필수 필드 + columns가 실제 df에 존재하는지 대조.
+    그림 렌더는 불필요. 문제를 리스트로 반환(파이프라인은 막지 않고 기록만 한다)."""
+    issues: list = []
+    reqs = state.get("chart_requests", []) or []
+    df = getattr(get_context(), "df", None)
+    df_cols = set(df.columns) if df is not None else None
+
+    for i, r in enumerate(reqs):
+        cols = (r.get("columns") or {})
+        if not r.get("intent"):
+            issues.append(f"#{i}: intent 누락")
+        if not cols:
+            issues.append(f"#{i}: columns 누락")
+        elif df_cols is not None:
+            missing = [c for c in cols if c not in df_cols]
+            if missing:
+                issues.append(f"#{i}: 존재하지 않는 컬럼 참조 {missing}")
+        if not r.get("stats"):
+            issues.append(f"#{i}: stats 비어있음")
+    return issues
 
 
 def validator_node(state: EDAState) -> dict:
@@ -80,6 +103,9 @@ def validator_node(state: EDAState) -> dict:
                            "reason": "재시도 소진 후 통과", "feedback": ""}
             elif verdict.get("retry_target") not in _RETRY_TARGETS:
                 verdict["retry_target"] = "planner"  # 타겟 불명확 시 기본값
+
+    # ── 차트 주문서 코드 검증(LLM 없음) — 기록만, 재시도 트리거 아님 ──
+    verdict["chart_issues"] = _check_chart_requests(state)
 
     # ── 결과 반영 ──
     update: Dict[str, Any] = {"validation_result": verdict}

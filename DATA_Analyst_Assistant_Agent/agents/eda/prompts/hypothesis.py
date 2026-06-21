@@ -2,8 +2,34 @@
 
 from __future__ import annotations
 
+# ─────────────────────────────
+# 가설 6유형 가이드 토글 (모듈 상수)
+#   True  : target 성격 → 유형 판별표 + '유형:' 필드를 프롬프트에 주입(유형↔검증방법 정합 강제)
+#   False : 기존 형식(관찰/H0/H1/검증방법/...)만 — 유형 가이드 없음
+# ─────────────────────────────
+HYPOTHESIS_TYPE_GUIDE = True
 
-def hypothesis_prompt(user_question: str, insight_result: str) -> str:
+
+_TYPE_GUIDE_BLOCK = """
+[가설 유형 판별 — 먼저 target 성격으로 유형을 정하고, 그 유형에 맞는 검증방법만 써라]
+아래 표로 target 성격 → 유형 → 검증방법을 정한다. (괄호는 EDA 근거)
+- 연속형 수치를 예측      → 회귀     → 단순/다중 선형회귀(또는 RandomForestRegressor)  (근거: correlation_pairs, distribution의 정규성·왜도, outliers)
+- 범주/이진을 예측        → 분류     → 로지스틱 회귀·의사결정나무(Accuracy·AUC)         (근거: group_comparison의 범주별 비율, 클래스 불균형) ※주의: target 파생 필요(연속→이진화)가 흔함
+- 두 변수 관계 유무·강도만 → 관계추론 → 피어슨/스피어만 상관검정(예측·계수 추정 아님)    (근거: correlation_pairs)
+- 집단 간 평균·분포 비교   → 그룹차이 → 일원배치 ANOVA(2집단이면 t검정)+사후 Tukey      (근거: group_comparison의 top3/bottom3, group_std)
+- 레이블 없는 구조 발견    → 군집     → K-means(+silhouette로 K 선택)                   (근거: clustering의 n_clusters·silhouette·centroids)
+- 시간축 수치 추세·계절성  → 시계열   → 추세분해·자기상관(예측은 ARIMA·Prophet)         (근거: time_result의 추세·시즌성)
+각 가설의 '유형:'에는 위 6가지(회귀/분류/관계추론/그룹차이/군집/시계열) 중 하나만 적고, '검증방법:'은 그 유형에 해당하는 방법만 써라.
+"""
+
+
+def hypothesis_prompt(user_question: str, insight_result: str,
+                      include_type_guide: bool = HYPOTHESIS_TYPE_GUIDE) -> str:
+    type_field = "유형: (회귀/분류/관계추론/그룹차이/군집/시계열 중 하나 — 아래 판별표 기준)\n" if include_type_guide else ""
+    type_guide = _TYPE_GUIDE_BLOCK if include_type_guide else ""
+    labels_note = "관찰:, 유형:, H0:, H1:, 검증방법:, 필요변수:, 현재데이터:" if include_type_guide \
+        else "관찰:, H0:, H1:, 검증방법:, 필요변수:, 현재데이터:"
+
     return f"""
 너는 데이터 분석 가설 설계자다. 네 가설은 다음 단계의 분석 에이전트(통계 검정, 모델링 수행)가 바로 실행할 수 있는 수준이어야 한다.
 
@@ -12,16 +38,16 @@ def hypothesis_prompt(user_question: str, insight_result: str) -> str:
 
 [핵심 인사이트 및 구조 해석]
 {insight_result}
-
+{type_guide}
 위 인사이트를 바탕으로 아래 형식으로 작성하라.
 마크다운 기호(###, **, * 등)는 절대 사용하지 마라. 일반 텍스트로만 작성하라.
 
 [가설 1] ~ [가설 3] 형식으로 3개를 작성하라. 핵심 패턴에서 검증 가능한 것만 골라라.
-각 가설은 아래 구조를 그대로 따르라. 섹션 레이블([가설 1] 등, 관찰:, H0:, H1:, 검증방법:, 필요변수:, 현재데이터:)은 반드시 그대로 유지하라.
+각 가설은 아래 구조를 그대로 따르라. 섹션 레이블([가설 1] 등, {labels_note})은 반드시 그대로 유지하라.
 
 [가설 1]
 관찰: (이 가설의 근거가 된 수치나 패턴을 1문장으로. 인사이트에서 끌어와라.)
-H0: (귀무가설 — A와 B 사이에 유의미한 관계가 없다)
+{type_field}H0: (귀무가설 — A와 B 사이에 유의미한 관계가 없다)
 H1: (대립가설 — IF [조건] THEN [결과]. 방향을 명시하라.)
 검증방법: (구체적인 통계 검정명. 예: 단순선형회귀, 스피어만 상관검정, 일원배치 ANOVA 등)
 필요변수: target=[변수명], feature=[변수명]
@@ -29,7 +55,7 @@ H1: (대립가설 — IF [조건] THEN [결과]. 방향을 명시하라.)
 
 [가설 2]
 관찰: ...
-H0: ...
+{type_field}H0: ...
 H1: ...
 검증방법: ...
 필요변수: ...
@@ -37,7 +63,7 @@ H1: ...
 
 [가설 3]
 관찰: ...
-H0: ...
+{type_field}H0: ...
 H1: ...
 검증방법: ...
 필요변수: ...

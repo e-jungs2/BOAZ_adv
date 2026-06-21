@@ -1,4 +1,5 @@
 import pandas as pd
+from DATA_Analyst_Assistant_Agent.agents.eda.tools.chart_requests import from_distribution_skill
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.visualize import (
     plot_distributions,
     plot_boxplots,
@@ -43,4 +44,5 @@ def run_distribution_skill(
         result["violins"]               = plot_violins(df, measure_cols=measure_cols)
         result["category_distribution"] = plot_category_distribution(df)
 
+    result["chart_requests"] = from_distribution_skill(result)
     return result

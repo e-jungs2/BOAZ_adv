@@ -14,7 +14,12 @@ import json
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import tool
 
-from DATA_Analyst_Assistant_Agent.agents.eda._runtime import MAX_NODE_RETRIES, get_context, get_llm
+from DATA_Analyst_Assistant_Agent.agents.eda._runtime import (
+    MAX_NODE_RETRIES,
+    accumulate_chart_requests,
+    get_context,
+    get_llm,
+)
 from DATA_Analyst_Assistant_Agent.agents.eda.prompts import react_fix_prompt
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.skills.comparison_skill import run_comparison_skill
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.skills.data_quality_skill import run_data_quality_skill
@@ -27,6 +32,14 @@ from DATA_Analyst_Assistant_Agent.agents.eda.tools.profiling import get_basic_pr
 # ─────────────────────────────
 # Tools
 # ─────────────────────────────
+def _emit_and_dump(ctx, result) -> str:
+    """skill 결과에서 차트 주문서(chart_requests)를 분리해 ctx에 누적하고,
+    나머지만 JSON으로 반환한다(주문서는 LLM에 노출하지 않아 토큰 낭비 없음)."""
+    if isinstance(result, dict):
+        accumulate_chart_requests(ctx, result.pop("chart_requests", []))
+    return json.dumps(result, ensure_ascii=False)
+
+
 @tool
 def profile_data() -> str:
     """데이터 기본 구조(shape, 컬럼 타입, 카디널리티, 시간 컬럼 여부, 기초통계)를 반환한다."""
@@ -64,10 +77,8 @@ def run_distribution() -> str:
     ctx = get_context()
     if ctx.df is None:
         return "데이터가 로드되지 않았습니다."
-    return json.dumps(
-        run_distribution_skill(ctx.df, measure_cols=ctx.measure_cols, question_type=ctx.question_type, priority_metrics=ctx.priority_metrics),
-        ensure_ascii=False,
-    )
+    return _emit_and_dump(ctx, run_distribution_skill(
+        ctx.df, measure_cols=ctx.measure_cols, question_type=ctx.question_type, priority_metrics=ctx.priority_metrics))
 
 
 @tool
@@ -76,10 +87,8 @@ def run_comparison() -> str:
     ctx = get_context()
     if ctx.df is None:
         return "데이터가 로드되지 않았습니다."
-    return json.dumps(
-        run_comparison_skill(ctx.df, key_col=ctx.key_col, measure_cols=ctx.measure_cols, question_type=ctx.question_type),
-        ensure_ascii=False,
-    )
+    return _emit_and_dump(ctx, run_comparison_skill(
+        ctx.df, key_col=ctx.key_col, measure_cols=ctx.measure_cols, question_type=ctx.question_type))
 
 
 @tool
@@ -88,10 +97,8 @@ def run_relationship() -> str:
     ctx = get_context()
     if ctx.df is None:
         return "데이터가 로드되지 않았습니다."
-    return json.dumps(
-        run_relationship_skill(ctx.df, measure_cols=ctx.measure_cols, question_type=ctx.question_type),
-        ensure_ascii=False,
-    )
+    return _emit_and_dump(ctx, run_relationship_skill(
+        ctx.df, measure_cols=ctx.measure_cols, question_type=ctx.question_type))
 
 
 @tool
@@ -100,10 +107,8 @@ def run_time() -> str:
     ctx = get_context()
     if ctx.df is None:
         return "데이터가 로드되지 않았습니다."
-    return json.dumps(
-        run_time_skill(ctx.df, measure_cols=ctx.measure_cols, time_cols=ctx.time_cols),
-        ensure_ascii=False,
-    )
+    return _emit_and_dump(ctx, run_time_skill(
+        ctx.df, measure_cols=ctx.measure_cols, time_cols=ctx.time_cols))
 
 
 # ─────────────────────────────

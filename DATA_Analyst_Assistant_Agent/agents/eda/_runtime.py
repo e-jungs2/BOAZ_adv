@@ -47,6 +47,7 @@ class EdaContext:
     count_col: Optional[str] = None
     question_type: str = ""
     priority_metrics: list = field(default_factory=list)
+    chart_requests: list = field(default_factory=list)  # skill이 발행한 차트 주문서 누적(중복제거됨)
 
 
 _context: Optional[EdaContext] = None
@@ -79,6 +80,24 @@ def safe_json_parse(text_value: str, fallback: dict) -> dict:
         return json.loads(cleaned)
     except Exception:
         return fallback
+
+
+def _chart_request_sig(req: dict) -> tuple:
+    cols = tuple(sorted((req.get("columns") or {}).keys()))
+    return (req.get("intent"), cols, req.get("hint"))
+
+
+def accumulate_chart_requests(ctx: "EdaContext", requests: list) -> None:
+    """skill이 발행한 차트 주문서를 ctx에 누적한다(intent·컬럼·hint 기준 중복제거).
+    ReAct 재호출/재시도로 같은 주문서가 여러 번 와도 한 번만 쌓인다."""
+    if not requests:
+        return
+    seen = {_chart_request_sig(r) for r in ctx.chart_requests}
+    for r in requests:
+        sig = _chart_request_sig(r)
+        if sig not in seen:
+            ctx.chart_requests.append(r)
+            seen.add(sig)
 
 
 def append_errors(state: dict, *errs) -> list:

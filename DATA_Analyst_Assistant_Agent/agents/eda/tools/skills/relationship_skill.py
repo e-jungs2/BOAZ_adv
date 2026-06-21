@@ -1,4 +1,5 @@
 import pandas as pd
+from DATA_Analyst_Assistant_Agent.agents.eda.tools.chart_requests import from_relationship_skill
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.visualize import (
     plot_correlation,
     plot_scatter_pairs,
@@ -32,4 +33,5 @@ def run_relationship_skill(
         result["correlation"]   = plot_correlation(df, measure_cols=measure_cols)
         result["scatter_pairs"] = plot_scatter_pairs(df, measure_cols=measure_cols)
 
+    result["chart_requests"] = from_relationship_skill(result)
     return result

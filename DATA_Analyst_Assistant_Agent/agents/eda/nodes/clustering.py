@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from DATA_Analyst_Assistant_Agent.agents.eda._runtime import append_errors, get_context
+from DATA_Analyst_Assistant_Agent.agents.eda._runtime import accumulate_chart_requests, append_errors, get_context
 from DATA_Analyst_Assistant_Agent.agents.eda.nodes.react import run_node_with_retry
 from DATA_Analyst_Assistant_Agent.agents.eda.state import EDAState
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.skills.clustering_skill import run_clustering_skill
@@ -20,4 +20,6 @@ def clustering_node(state: EDAState) -> dict:
         "clustering",
         fallback={"skip": True, "reason": "클러스터링 오류로 스킵"},
     )
+    if isinstance(result, dict):
+        accumulate_chart_requests(ctx, result.pop("chart_requests", []))
     return {"clustering_result": result, "error_log": append_errors(state, err)}

@@ -52,6 +52,7 @@ class EDAState(TypedDict, total=False):
     final_summary: str
     key_charts: List[str]
     statistical_metadata: Dict[str, Any]  # downstream 에이전트용 raw 수치
+    chart_requests: List[Dict[str, Any]]  # EDA가 발행한 차트 주문서(intent/stats/columns/hint) — chart/ 렌더용
 
     # 에러 로그
     error_log: List[str]

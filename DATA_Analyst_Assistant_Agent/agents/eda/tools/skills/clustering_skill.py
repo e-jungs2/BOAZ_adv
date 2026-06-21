@@ -3,6 +3,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.cluster import KMeans
 from sklearn.metrics import silhouette_score
+from DATA_Analyst_Assistant_Agent.agents.eda.tools.chart_requests import from_clustering_skill
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.visualize import plot_cluster_profile, plot_cluster_scatter
 
 
@@ -104,7 +105,7 @@ def run_clustering_skill(
                                               cluster_col="cluster", key_col=key_col)
         chart_paths.extend(result_scatter.get("chart_paths", []))
 
-    return {
+    result = {
         "skip": False,
         "n_clusters": k,
         "silhouette_score": silhouette,
@@ -112,3 +113,5 @@ def run_clustering_skill(
         "cluster_centroids": centers_raw.to_dict(orient="index"),
         "chart_paths": chart_paths,
     }
+    result["chart_requests"] = from_clustering_skill(result)
+    return result

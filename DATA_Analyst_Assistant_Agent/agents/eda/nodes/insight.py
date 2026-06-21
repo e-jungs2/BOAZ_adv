@@ -137,8 +137,27 @@ def insight_node(state: EDAState) -> dict:
                 lambda: llm.invoke(prompt).content.strip(), "insight", fallback="인사이트 생성 실패"
             )
 
+    # 분석 노드들이 ctx에 누적한 차트 주문서를 state로 노출 + 아티팩트로 영속화.
+    chart_requests = list(get_context().chart_requests)
+    _persist_chart_requests(chart_requests)
+
     return {
         "insight_result": insight_result,
         "statistical_metadata": statistical_metadata,
+        "chart_requests": chart_requests,
         "error_log": append_errors(state, err),
     }
+
+
+def _persist_chart_requests(chart_requests: list) -> None:
+    """차트 주문서를 outputs/chart_requests.json 으로 기록(Phase B/report 소비용). 실패해도 무시."""
+    import os
+
+    from DATA_Analyst_Assistant_Agent.agents.eda.tools import visualize  # OUTPUT_DIR 동적 반영
+
+    try:
+        out_path = os.path.join(os.path.dirname(visualize.OUTPUT_DIR), "chart_requests.json")
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(chart_requests, f, ensure_ascii=False, indent=2)
+    except Exception:  # noqa: BLE001
+        pass

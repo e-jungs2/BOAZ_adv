@@ -1,4 +1,5 @@
 import pandas as pd
+from DATA_Analyst_Assistant_Agent.agents.eda.tools.chart_requests import from_comparison_skill
 from DATA_Analyst_Assistant_Agent.agents.eda.tools.visualize import (
     plot_top_n_barplot,
     plot_heatmap_matrix,
@@ -42,4 +43,5 @@ def run_comparison_skill(
         result["radar"]          = plot_radar(df, key_col=key_col, measure_cols=measure_cols)
         result["grouped_bar"]    = plot_grouped_bar(df, key_col=key_col, measure_cols=measure_cols)
 
+    result["chart_requests"] = from_comparison_skill(result, key_col=key_col, measure_cols=measure_cols)
     return result
