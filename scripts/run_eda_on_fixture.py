@@ -25,6 +25,17 @@ from DATA_Analyst_Assistant_Agent.agents.eda.tools.reliability import assess_sam
 FIXTURES = ["f1_order_level", "f2_category_level", "f3_category_month"]
 
 
+def _clean_output(out_dir: str) -> None:
+    """런마다 출력 폴더의 옛 PNG를 비운다(이전 런 차트가 섞이지 않게)."""
+    import glob
+    for sub in ("all", "key"):
+        for p in glob.glob(os.path.join(out_dir, sub, "*.png")):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+
 def run_graph(name: str) -> None:
     """모드 B — fixture를 진짜 EDA LangGraph에 통과시킨다. ⚠️ LLM(OpenRouter) 호출 발생."""
     from DATA_Analyst_Assistant_Agent.agents.eda._runtime import EdaContext, reset_context, set_context
@@ -33,6 +44,7 @@ def run_graph(name: str) -> None:
     df, c = load_fixture(name)
     out_dir = os.path.join(_REPO_ROOT, "daaa_outputs", "fixture_preview", name + "_graph")
     visualize.set_output_dirs(out_dir)
+    _clean_output(out_dir)
 
     target = c.target_candidates[0] if c.target_candidates else None
     reset_context()
@@ -120,6 +132,7 @@ def run_one(name: str) -> None:
     df, c = load_fixture(name)
     out_dir = os.path.join(_REPO_ROOT, "daaa_outputs", "fixture_preview", name)
     visualize.set_output_dirs(out_dir)
+    _clean_output(out_dir)
 
     print(f"\n========== {name} ==========")
     print(f"rows={len(df)} | grain='{c.grain_hint}' level={c.level} | key={c.key_col} "

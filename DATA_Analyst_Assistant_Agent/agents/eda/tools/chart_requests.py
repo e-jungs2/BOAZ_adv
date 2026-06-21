@@ -77,6 +77,10 @@ def from_relationship_skill(result: dict) -> List[dict]:
         out.append(_req(f"{a}와 {b}의 관계를 산점도로({direction}의 상관 강조)",
                         {a: {"type": "numeric"}, b: {"type": "numeric"}}, st, "scatter"))
 
+    dbt = result.get("dist_by_target") or {}
+    if dbt.get("stats"):
+        out += from_distribution_by_target(dbt)
+
     return out
 
 

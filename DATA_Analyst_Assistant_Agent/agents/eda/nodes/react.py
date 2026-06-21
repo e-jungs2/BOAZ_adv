@@ -99,7 +99,7 @@ def run_relationship() -> str:
     if ctx.df is None:
         return "데이터가 로드되지 않았습니다."
     return _emit_and_dump(ctx, run_relationship_skill(
-        ctx.df, measure_cols=ctx.measure_cols, question_type=ctx.question_type))
+        ctx.df, measure_cols=ctx.measure_cols, question_type=ctx.question_type, target_col=ctx.target_col))
 
 
 @tool
