@@ -837,4 +837,175 @@ def plot_grouped_box(df: pd.DataFrame, key_col: str = None, measure_cols: list =
             "note": (f"{widest[0]} 그룹의 산포(IQR={widest[1]['iqr']})가 가장 큼 — 평균만으론 안 보이는 편차"
                      if widest else ""),
         }
-    return {"chart_paths": paths, "stats": stats}
+    return {"chart_paths": paths, "stats": stats, "key_col": key_col}
+
+
+def plot_distribution_by_target(df: pd.DataFrame, target_col: str = None, measure_cols: list = None,
+                                max_levels: int = 8, n_bins: int = 4, min_rows: int = 5) -> dict:
+    """target(결과변수) 수준별로 다른 수치의 분포를 비교 — 'X가 target에 영향을 주는가'에 정조준.
+
+    target이 이산(예: 리뷰점수 1~5)이면 그 값으로, 연속이면 사분위 구간으로 묶는다.
+    그룹당 표본이 부족하면(집계본 등) 스킵.
+    """
+    numeric_cols = _get_numeric_cols(df, measure_cols)
+    if (not target_col or target_col not in df.columns
+            or not pd.api.types.is_numeric_dtype(df[target_col])):
+        return {"chart_paths": [], "stats": {}, "target": target_col,
+                "skipped": "target 수치 컬럼 없음"}
+
+    t = df[target_col]
+    rounded = t.round()
+    nun = int(rounded.dropna().nunique())   # 평균값 등 소수점 섞여도 정수 기준 수준 수로 판단
+    if nun <= 1:
+        return {"chart_paths": [], "stats": {}, "target": target_col, "skipped": "target 값 단일"}
+
+    if nun <= max_levels:
+        buckets = rounded.astype("Int64")
+        levels = sorted(b for b in buckets.dropna().unique())
+        label = {b: str(int(b)) for b in levels}
+    else:
+        try:
+            buckets = pd.qcut(t, n_bins, duplicates="drop")
+        except Exception:  # noqa: BLE001
+            return {"chart_paths": [], "stats": {}, "target": target_col, "skipped": "구간화 실패"}
+        levels = list(buckets.cat.categories)
+        label = {lv: f"Q{i + 1}" for i, lv in enumerate(levels)}
+
+    work = df.assign(_bucket=buckets)
+    paths, stats = [], {}
+    for metric in numeric_cols:
+        if metric == target_col:
+            continue
+        groups, labels, per = [], [], {}
+        for lv in levels:
+            s = work.loc[work["_bucket"] == lv, metric].dropna()
+            if len(s) < min_rows:
+                continue
+            groups.append(s.values)
+            labels.append(label[lv])
+            per[label[lv]] = {"median": round(float(s.median()), 2), "n": int(len(s))}
+        if len(groups) < 2:
+            continue
+
+        colors = sns.color_palette("RdYlGn", len(groups))
+        fig, ax = plt.subplots(figsize=(max(6, len(groups) * 1.1), 5))
+        bp = ax.boxplot(groups, patch_artist=True, showfliers=True,
+                        medianprops=dict(color="black", linewidth=2),
+                        flierprops=dict(marker="o", markersize=3, alpha=0.3,
+                                        markerfacecolor=PALETTE_NEG, markeredgecolor="none"))
+        for patch, color in zip(bp["boxes"], colors):
+            patch.set_facecolor(color)
+            patch.set_alpha(0.8)
+            patch.set_edgecolor("white")
+        ax.set_xticks(range(1, len(labels) + 1))
+        ax.set_xticklabels(labels)
+        _apply_style(ax, f"{metric} distribution by {target_col}", xlabel=target_col, ylabel=metric)
+        ax.grid(axis="y", linestyle="--", linewidth=0.5, alpha=0.6)
+        fig.tight_layout()
+        path = os.path.join(OUTPUT_DIR, f"distbytarget_{metric}.png")
+        fig.savefig(path, bbox_inches="tight", dpi=120)
+        plt.close(fig)
+        paths.append(path)
+
+        meds = [v["median"] for v in per.values()]
+        trend = ("target 낮을수록 높음" if meds[0] > meds[-1]
+                 else "target 낮을수록 낮음" if meds[0] < meds[-1] else "수준 간 차이 작음")
+        stats[metric] = {"target": target_col, "by_level": per, "trend": trend}
+    return {"chart_paths": paths, "stats": stats, "target": target_col}
+
+
+def plot_multiline_timeseries(df: pd.DataFrame, time_col: str = None, key_col: str = None,
+                              measure_cols: list = None, top_n: int = 6, min_periods: int = 3) -> dict:
+    """카테고리별 시간 추세를 한 그래프에 여러 줄로(상위 N개) — 시간 × 범주 교차."""
+    numeric_cols = _get_numeric_cols(df, measure_cols)
+    cat_cols = list(df.select_dtypes(include=["object"]).columns)
+    if not time_col:
+        time_col = next((c for c in df.columns
+                         if "datetime" in str(df[c].dtype) or "date" in c.lower() or "month" in c.lower()), None)
+    if key_col is None or key_col not in df.columns:
+        key_col = cat_cols[0] if cat_cols else None
+    if not time_col or not key_col or not numeric_cols:
+        return {"chart_paths": [], "stats": {}, "skipped": "시간/범주/수치 컬럼 부족"}
+
+    d = df.copy()
+    period = pd.to_datetime(d[time_col], errors="coerce").dt.to_period("M").astype(str)
+    if period.notna().sum() == 0:
+        return {"chart_paths": [], "stats": {}, "skipped": f"{time_col} 시간 파싱 불가"}
+    d["_period"] = period
+
+    paths, stats = [], {}
+    for metric in numeric_cols:
+        agg = d.groupby(["_period", key_col])[metric].mean().reset_index()
+        top_cats = d.groupby(key_col)[metric].sum().nlargest(top_n).index
+        wide = (agg[agg[key_col].isin(top_cats)]
+                .pivot(index="_period", columns=key_col, values=metric).sort_index())
+        if len(wide) < min_periods or wide.shape[1] == 0:
+            continue
+
+        colors = sns.color_palette("tab10", wide.shape[1])
+        fig, ax = plt.subplots(figsize=(max(9, len(wide) * 0.5), 5))
+        for (col, series), color in zip(wide.items(), colors):
+            ax.plot(range(len(wide)), series.values, marker="o", markersize=3,
+                    linewidth=1.6, color=color, label=str(col)[:18])
+        ax.set_xticks(range(len(wide)))
+        ax.set_xticklabels(list(wide.index), rotation=45, ha="right", fontsize=7)
+        ax.legend(fontsize=7, frameon=False, ncol=2, loc="upper left")
+        _apply_style(ax, f"{metric} trend by {key_col} (top {wide.shape[1]})", ylabel=metric)
+        fig.tight_layout()
+        path = os.path.join(OUTPUT_DIR, f"multiline_{metric}.png")
+        fig.savefig(path, bbox_inches="tight", dpi=120)
+        plt.close(fig)
+        paths.append(path)
+
+        per = {}
+        for col in wide.columns:
+            s = wide[col].dropna()
+            if len(s) >= 2:
+                chg = (float(s.iloc[-1]) - float(s.iloc[0])) / (abs(float(s.iloc[0])) + 1e-9) * 100
+                per[str(col)] = {"start": round(float(s.iloc[0]), 2), "end": round(float(s.iloc[-1]), 2),
+                                 "change_pct": round(chg, 1), "peak_period": str(s.idxmax())}
+        stats[metric] = {"by_category": per, "periods": int(len(wide))}
+    return {"chart_paths": paths, "stats": stats, "key_col": key_col, "time_col": time_col}
+
+
+def plot_crosstab_heatmap(df: pd.DataFrame, cat_a: str = None, cat_b: str = None,
+                          max_card: int = 15, max_overall_card: int = 50) -> dict:
+    """두 범주형 변수의 교차 빈도 히트맵 — 범주 × 범주."""
+    cats = [c for c in df.select_dtypes(include=["object"]).columns
+            if df[c].nunique() <= max_overall_card]
+    if cat_a is None or cat_b is None:
+        if len(cats) < 2:
+            return {"chart_paths": [], "stats": {}, "skipped": "범주형 컬럼 2개 미만 — 교차 불가"}
+        cat_a, cat_b = cats[0], cats[1]
+    if cat_a not in df.columns or cat_b not in df.columns:
+        return {"chart_paths": [], "stats": {}, "skipped": "지정 범주 컬럼 없음"}
+
+    top_a = df[cat_a].value_counts().nlargest(max_card).index
+    top_b = df[cat_b].value_counts().nlargest(max_card).index
+    sub = df[df[cat_a].isin(top_a) & df[cat_b].isin(top_b)]
+    ct = pd.crosstab(sub[cat_a], sub[cat_b])
+    if ct.size == 0:
+        return {"chart_paths": [], "stats": {}, "skipped": "교차표 비어있음"}
+
+    fig_w = max(8, ct.shape[1] * 0.7 + 2)
+    fig_h = max(5, ct.shape[0] * 0.5 + 2)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    sns.heatmap(ct, annot=True, fmt="d", cmap="Blues", ax=ax,
+                linewidths=0.4, linecolor="#eeeeee", cbar_kws={"shrink": 0.6}, annot_kws={"size": 7})
+    ax.set_title(f"Crosstab: {cat_a} x {cat_b} (counts)", fontsize=12, fontweight="bold", pad=10)
+    ax.tick_params(axis="x", labelsize=8, rotation=40)
+    ax.tick_params(axis="y", labelsize=8, rotation=0)
+    fig.tight_layout()
+    path = os.path.join(OUTPUT_DIR, f"crosstab_{cat_a}_x_{cat_b}.png")
+    fig.savefig(path, bbox_inches="tight", dpi=120)
+    plt.close(fig)
+
+    total = int(ct.values.sum())
+    flat = ct.stack()
+    top_cell = flat.idxmax()
+    stats = {
+        "cat_a": cat_a, "cat_b": cat_b, "total": total,
+        "top_combo": {"a": str(top_cell[0]), "b": str(top_cell[1]), "count": int(flat.max())},
+        "shape": list(ct.shape),
+    }
+    return {"chart_paths": [path], "stats": stats, "cat_a": cat_a, "cat_b": cat_b}

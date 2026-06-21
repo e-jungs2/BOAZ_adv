@@ -145,6 +145,46 @@ def from_grouped_box(result: dict, key_col: str) -> List[dict]:
     return out
 
 
+def from_distribution_by_target(result: dict) -> List[dict]:
+    """target 수준별 수치 분포(쿼리 정조준) 주문서."""
+    out: List[dict] = []
+    target = result.get("target") or "target"
+    for metric, st in (result.get("stats") or {}).items():
+        out.append(_req(
+            f"{target} 수준별 {metric} 분포를 비교해 {metric}이 {target}에 영향을 주는지 본다",
+            {target: {"type": "ordinal_or_numeric"}, metric: {"type": "numeric"}},
+            st, "grouped_box",
+        ))
+    return out
+
+
+def from_multiline(result: dict) -> List[dict]:
+    """카테고리별 시간 추세(다중 선) 주문서."""
+    out: List[dict] = []
+    kc = result.get("key_col") or "category"
+    tc = result.get("time_col") or "time"
+    for metric, st in (result.get("stats") or {}).items():
+        out.append(_req(
+            f"{kc}별 {metric}의 시간 추세를 여러 선으로 비교(누가 언제 뜨고 지나)",
+            {tc: {"type": "temporal"}, kc: {"type": "categorical"}, metric: {"type": "numeric"}},
+            st, "multiline",
+        ))
+    return out
+
+
+def from_crosstab(result: dict) -> List[dict]:
+    """두 범주 교차 빈도 히트맵 주문서."""
+    st = result.get("stats") or {}
+    if not st:
+        return []
+    a, b = st.get("cat_a", "a"), st.get("cat_b", "b")
+    return [_req(
+        f"{a} × {b} 교차 빈도를 히트맵으로(어떤 조합이 몰리나)",
+        {a: {"type": "categorical"}, b: {"type": "categorical"}},
+        st, "crosstab",
+    )]
+
+
 # ─────────────────────────────
 # clustering skill
 # ─────────────────────────────
