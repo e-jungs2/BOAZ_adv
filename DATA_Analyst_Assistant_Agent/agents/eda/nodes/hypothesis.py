@@ -31,7 +31,11 @@ def _resolve_target(state: EDAState) -> str:
 def hypothesis_node(state: EDAState) -> dict:
     llm = get_llm()
     target = _resolve_target(state)
-    prompt = hypothesis_prompt(state["user_question"], state.get("insight_result", ""), target_hint=target)
+    data_level = state.get("data_level", {}) or {}
+    low_n_groups = (state.get("statistical_metadata", {}) or {}).get("sample_reliability", {}).get("low_n_groups", [])
+    prompt = hypothesis_prompt(
+        state["user_question"], state.get("insight_result", ""),
+        target_hint=target, data_level=data_level, low_n_groups=low_n_groups)
     fb = state.get("validation_feedback")
     if fb:
         prompt += f"\n[직전 검증 지적 — 반드시 보완하라]\n{fb}\n"

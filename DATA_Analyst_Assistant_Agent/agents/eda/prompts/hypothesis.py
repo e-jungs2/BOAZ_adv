@@ -25,7 +25,8 @@ _TYPE_GUIDE_BLOCK = """
 
 def hypothesis_prompt(user_question: str, insight_result: str,
                       include_type_guide: bool = HYPOTHESIS_TYPE_GUIDE,
-                      target_hint: str = "") -> str:
+                      target_hint: str = "", data_level: dict = None,
+                      low_n_groups: list = None) -> str:
     type_field = "유형: (회귀/분류/관계추론/그룹차이/군집/시계열 중 하나 — 아래 판별표 기준)\n" if include_type_guide else ""
     type_guide = _TYPE_GUIDE_BLOCK if include_type_guide else ""
     labels_note = "관찰:, 유형:, H0:, H1:, 검증방법:, 필요변수:, 현재데이터:" if include_type_guide \
@@ -37,6 +38,22 @@ def hypothesis_prompt(user_question: str, insight_result: str,
         if target_hint else ""
     )
 
+    # 데이터 한계 가드 — 자가점검(data_level/표본)을 가설이 어기지 않게
+    level = (data_level or {}).get("level")
+    low_names = ", ".join(f"{g.get('group')}(n={g.get('n')})" for g in (low_n_groups or [])[:6])
+    guard_lines = []
+    if level == "aggregated":
+        guard_lines.append(
+            "이 데이터는 집계본(그룹당 1행)이다. ANOVA·t검정·개별 회귀처럼 '개별 관측'이 필요한 검정은 "
+            "지금 데이터로 못 돌린다 → 그런 가설은 '현재데이터: 추가 필요(원본 행 필요)'로 솔직히 표기하라. "
+            "집계 단위 방법(평균 간 상관·순위 비교)만 '검증 가능'으로 써라.")
+        guard_lines.append(
+            "집계 평균끼리의 상관을 개인 수준 결론으로 확대하지 마라(생태학적 오류). 관찰에 '카테고리 평균 기준'임을 명시하라.")
+    if low_names:
+        guard_lines.append(f"표본 30 미만 항목({low_names})을 가설의 관찰 근거로 쓰지 마라 — 신뢰도가 낮다.")
+    guard_block = ("\n[데이터 한계 — 반드시 준수]\n" + "\n".join(f"- {x}" for x in guard_lines) + "\n"
+                   if guard_lines else "")
+
     return f"""
 너는 데이터 분석 가설 설계자다. 네 가설은 다음 단계의 분석 에이전트(통계 검정, 모델링 수행)가 바로 실행할 수 있는 수준이어야 한다.
 
@@ -45,11 +62,12 @@ def hypothesis_prompt(user_question: str, insight_result: str,
 
 [핵심 인사이트 및 구조 해석]
 {insight_result}
-{target_block}{type_guide}
+{target_block}{guard_block}{type_guide}
 위 인사이트를 바탕으로 아래 형식으로 작성하라.
 마크다운 기호(###, **, * 등)는 절대 사용하지 마라. 일반 텍스트로만 작성하라.
 
-[가설 1] ~ [가설 3] 형식으로 3개를 작성하라. 핵심 패턴에서 검증 가능한 것만 골라라.
+[가설 1], [가설 2] 형식으로 2~4개를 작성하라. 핵심 패턴에서 검증 가능한 것만 골라라.
+데이터가 강하게 받쳐주는 것만 — 억지로 수를 채우지 말고, 근거가 약하면(표본 부족·자명한 관계·집계 한계) 빼라. 최소 2개, 최대 4개.
 각 가설은 아래 구조를 그대로 따르라. 섹션 레이블([가설 1] 등, {labels_note})은 반드시 그대로 유지하라.
 
 [가설 1]
@@ -68,21 +86,16 @@ H1: ...
 필요변수: ...
 현재데이터: ...
 
-[가설 3]
-관찰: ...
-{type_field}H0: ...
-H1: ...
-검증방법: ...
-필요변수: ...
-현재데이터: ...
+([가설 3], [가설 4]는 데이터가 강하게 받쳐줄 때만 위와 같은 형식으로 추가하라. 약하거나 자명하면 추가하지 마라.)
 
 작성 규칙:
 - 클러스터 레이블(cluster_group, cluster_id 등)을 feature로 사용하지 마라 → 순환논리. 클러스터에서 발견한 패턴을 원래 measure 변수로 재표현하라.
 - 특정 항목 이름(카테고리명, 상품명 등)을 H1 조건에 직접 넣지 마라 → 관찰이지 가설이 아님. measure 변수 패턴으로 일반화하라.
 - 현재 마트에 없는 변수를 필요변수로 적으면서 검증 가능하다고 쓰지 마라.
+- 한 변수가 다른 변수의 구성요소면(예: 매출=가격×수량, 합계=항목들의 합) 그 상관은 자명하니 가설로 쓰지 마라. 비자명한 관계만 가설로.
 
 [다음 분석 방향]
-위 3개 가설은 단순 이변량(A→B) 관계를 다룬다. 교란변수(confounding variable)가 결과를 왜곡할 수 있으므로 아래 2가지를 작성하라.
+위 가설들은 단순 이변량(A→B) 관계를 다룬다. 교란변수(confounding variable)가 결과를 왜곡할 수 있으므로 아래 2가지를 작성하라.
 1. 교란변수 후보: 위 가설들의 결과에 영향을 미칠 수 있는 변수를 현재 마트에서 골라라. 없으면 추가 확보가 필요한 변수를 명시하라.
 2. 통제 방법: 교란변수를 통제하기 위한 다음 분석 방법 제안 (예: 다중회귀로 확장, 층화 분석, 그룹별 하위분석 등)
 
