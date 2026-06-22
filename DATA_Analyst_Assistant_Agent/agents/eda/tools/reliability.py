@@ -105,7 +105,8 @@ def assess_sample_reliability(df: pd.DataFrame, key_col: Optional[str] = None,
     return out
 
 
-def correct_hypothesis_feasibility(df: pd.DataFrame, hypotheses_text: str) -> Tuple[str, List[dict]]:
+def correct_hypothesis_feasibility(df: pd.DataFrame, hypotheses_text: str,
+                                   data_level: Optional[dict] = None) -> Tuple[str, List[dict]]:
     """가설 텍스트에서 '불가능한 검정'을 코드로(사실 기준) 교정한다 — LLM 아님, 영구적.
 
     그룹 간 차이 검정(ANOVA/t검정)은 그룹당 복수 관측이 있어야 한다. feature 그룹이
@@ -116,15 +117,30 @@ def correct_hypothesis_feasibility(df: pd.DataFrame, hypotheses_text: str) -> Tu
     if df is None or not hypotheses_text:
         return hypotheses_text, []
 
-    def _group_diff_feasible(feature: Optional[str]) -> Optional[bool]:
-        if not feature or feature not in df.columns:
-            return None  # 알 수 없으면 건드리지 않음
-        try:
-            sizes = df.groupby(feature).size()
-        except Exception:  # noqa: BLE001
+    aggregated = (data_level or {}).get("level") == "aggregated"
+
+    def _resolve_col(feature: Optional[str]) -> Optional[str]:
+        """LLM이 컬럼명을 줄여 쓸 수 있어(category→product_category) 퍼지 매칭으로 실제 컬럼 찾기."""
+        if not feature:
             return None
+        if feature in df.columns:
+            return feature
+        fl = feature.lower()
+        cands = [c for c in df.columns if fl in c.lower() or c.lower() in fl]
+        obj = [c for c in cands if df[c].dtype == object]  # 그룹 컬럼은 보통 범주형
+        return (obj or cands or [None])[0]
+
+    def _group_diff_feasible(feature: Optional[str]) -> Tuple[Optional[bool], Optional[str]]:
+        col = _resolve_col(feature)
+        if col is None:
+            # 컬럼 못 찾음 — 집계본이면 그룹 간 검정은 어차피 불가(폴백)
+            return (False if aggregated else None), None
+        try:
+            sizes = df.groupby(col).size()
+        except Exception:  # noqa: BLE001
+            return None, col
         # 그룹당 2행 이상인 그룹이 2개 이상이어야 그룹 간 차이 검정이 가능
-        return int((sizes >= 2).sum()) >= 2
+        return int((sizes >= 2).sum()) >= 2, col
 
     lines = hypotheses_text.split("\n")
     corrections: List[dict] = []
@@ -134,12 +150,13 @@ def correct_hypothesis_feasibility(df: pd.DataFrame, hypotheses_text: str) -> Tu
         method = (cur["method"] or "").lower()
         if cur["data_idx"] is None or not any(k in method for k in _GROUP_DIFF_METHODS):
             return
-        feasible = _group_diff_feasible(cur["feature"])
+        feasible, col = _group_diff_feasible(cur["feature"])
         if feasible is False:
+            label = col or cur["feature"] or "그룹"
             lines[cur["data_idx"]] = (
-                f"현재데이터: 추가 필요 (원본 행 필요 — '{cur['feature']}'가 그룹당 1행이라 "
+                f"현재데이터: 추가 필요 (원본 행 필요 — '{label}'가 그룹당 1행이라 "
                 f"{cur['method'].strip()} 불가)")
-            corrections.append({"feature": cur["feature"], "method": cur["method"].strip()})
+            corrections.append({"feature": cur["feature"], "resolved": col, "method": cur["method"].strip()})
 
     for i, ln in enumerate(lines):
         s = ln.strip()
