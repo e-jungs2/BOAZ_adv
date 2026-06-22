@@ -15,3 +15,10 @@ langchain-google-genai
 matplotlib
 seaborn
 scikit-learn
+statsmodels
+pymc-marketing==0.19.3
+geopandas
+libpysal
+esda
+ortools
+dowhy
