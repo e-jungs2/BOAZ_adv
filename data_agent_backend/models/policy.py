@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from enum import StrEnum
-
-from .common import BackendModel
+from .common import BackendModel, StrEnum
 
 
 class RiskLevel(StrEnum):

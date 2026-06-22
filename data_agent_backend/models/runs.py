@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-from enum import StrEnum
-
 from .approvals import ApprovalRequest
 from .artifacts import ArtifactRecord
-from .common import BackendModel, JsonDict
+from .common import BackendModel, JsonDict, StrEnum
 
 
 class RunStatus(StrEnum):
