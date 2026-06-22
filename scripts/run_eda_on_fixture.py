@@ -76,8 +76,42 @@ def run_graph(name: str) -> None:
     print(f"--- final_summary ---\n{result.get('final_summary', '')[:600]}")
 
     summary_path = _write_run_summary(name, c, result, out_dir)
+    eda_summary_path = _write_eda_summary(name, c, df, result, out_dir)
     print(f"output dir: {visualize.OUTPUT_DIR}")
     print(f"결과 요약: {summary_path}")
+    print(f"analysis 전달용(eda_summary.json): {eda_summary_path}")
+
+
+def _write_eda_summary(name: str, contract, df, result: dict, out_dir: str) -> str:
+    """analysis가 실제로 받는 아티팩트(eda_summary.json)와 동일 구조로 떨군다.
+    agents/eda/agent.py 의 payload(30~45줄)와 동일 키 — 이게 핸드오프 계약."""
+    import json as _json
+    import os
+
+    payload = {
+        "run_id": f"fixture-{name}",
+        "source_artifacts": [name],
+        "profile": {
+            "row_count": int(len(df)),
+            "columns": list(df.columns),
+            "quality_status": "ok",
+        },
+        "user_question": contract.question,
+        "analysis_plan": result.get("analysis_plan", {}),
+        "insight_result": result.get("insight_result", ""),
+        "hypotheses": result.get("hypotheses", ""),
+        "final_summary": result.get("final_summary", ""),
+        "analysis_target": result.get("analysis_target", ""),
+        "data_level": result.get("data_level", {}),
+        "cautions": result.get("cautions", []),
+        "statistical_metadata": result.get("statistical_metadata", {}),
+        "key_charts": [os.path.basename(p) for p in result.get("key_charts", [])],
+        "error_log": result.get("error_log", []),
+    }
+    path = os.path.join(out_dir, "eda_summary.json")
+    with open(path, "w", encoding="utf-8") as f:
+        _json.dump(payload, f, ensure_ascii=False, indent=2, default=str)
+    return path
 
 
 def _write_run_summary(name: str, contract, result: dict, out_dir: str) -> str:
