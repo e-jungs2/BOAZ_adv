@@ -43,6 +43,11 @@ def hypothesis_node(state: EDAState) -> dict:
         lambda: llm.invoke(prompt).content.strip(), "hypothesis", fallback="가설 생성 실패"
     )
 
+    # 결정론 게이트(LLM 아님): 불가능한 검정(집계본에 ANOVA/t검정)을 사실 기준으로 교정.
+    # 요약 만들기 전에 고쳐야 가설+요약이 일관됨.
+    from DATA_Analyst_Assistant_Agent.agents.eda.tools.reliability import correct_hypothesis_feasibility
+    hypotheses, _feas_fixes = correct_hypothesis_feasibility(get_context().df, hypotheses)
+
     summary_prompt = handoff_summary_prompt(state.get("insight_result", ""), hypotheses)
     final_summary, err2 = run_node_with_retry(
         lambda: llm.invoke(summary_prompt).content.strip(), "final_summary", fallback="요약 생성 실패"

@@ -11,9 +11,13 @@ EDA가 받은 데이터를 스스로 진단한다:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+import re
+from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
+
+# 그룹 간 차이 검정(그룹당 복수 관측이 반드시 필요) — 집계본(그룹당 1행)에선 수학적으로 불가
+_GROUP_DIFF_METHODS = ("anova", "분산분석", "t검정", "t-검정", "t test", "ttest", "tukey", "튜키")
 
 # 집계 산출물임을 시사하는 컬럼명 힌트
 _AGG_NAME_HINTS = ("avg_", "mean_", "total_", "sum_", "count_", "cnt_",
@@ -99,6 +103,60 @@ def assess_sample_reliability(df: pd.DataFrame, key_col: Optional[str] = None,
     else:
         out["note"] = f"모든 그룹 표본 {min_n} 이상 → 표본 신뢰도 양호"
     return out
+
+
+def correct_hypothesis_feasibility(df: pd.DataFrame, hypotheses_text: str) -> Tuple[str, List[dict]]:
+    """가설 텍스트에서 '불가능한 검정'을 코드로(사실 기준) 교정한다 — LLM 아님, 영구적.
+
+    그룹 간 차이 검정(ANOVA/t검정)은 그룹당 복수 관측이 있어야 한다. feature 그룹이
+    사실상 그룹당 1행(집계본)이면 그 검정은 못 돌리므로, 해당 가설의 '현재데이터:' 라벨을
+    '추가 필요(원본 행 필요)'로 강제 교정한다. (의견 아니라 groupby 행수라는 사실로 판정)
+    반환: (교정된 텍스트, 교정 내역).
+    """
+    if df is None or not hypotheses_text:
+        return hypotheses_text, []
+
+    def _group_diff_feasible(feature: Optional[str]) -> Optional[bool]:
+        if not feature or feature not in df.columns:
+            return None  # 알 수 없으면 건드리지 않음
+        try:
+            sizes = df.groupby(feature).size()
+        except Exception:  # noqa: BLE001
+            return None
+        # 그룹당 2행 이상인 그룹이 2개 이상이어야 그룹 간 차이 검정이 가능
+        return int((sizes >= 2).sum()) >= 2
+
+    lines = hypotheses_text.split("\n")
+    corrections: List[dict] = []
+    cur = {"method": "", "feature": None, "data_idx": None}
+
+    def _flush() -> None:
+        method = (cur["method"] or "").lower()
+        if cur["data_idx"] is None or not any(k in method for k in _GROUP_DIFF_METHODS):
+            return
+        feasible = _group_diff_feasible(cur["feature"])
+        if feasible is False:
+            lines[cur["data_idx"]] = (
+                f"현재데이터: 추가 필요 (원본 행 필요 — '{cur['feature']}'가 그룹당 1행이라 "
+                f"{cur['method'].strip()} 불가)")
+            corrections.append({"feature": cur["feature"], "method": cur["method"].strip()})
+
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if s.startswith("[가설"):
+            _flush()
+            cur = {"method": "", "feature": None, "data_idx": None}
+        elif s.startswith("검증방법:"):
+            cur["method"] = s.split(":", 1)[1]
+        elif s.startswith("필요변수:"):
+            m = re.search(r"feature\s*=\s*\[?\s*([A-Za-z0-9_]+)", s)
+            if m:
+                cur["feature"] = m.group(1)
+        elif s.startswith("현재데이터:"):
+            cur["data_idx"] = i
+    _flush()  # 마지막 블록
+
+    return "\n".join(lines), corrections
 
 
 def build_cautions(data_level: Dict[str, Any], reliability: Dict[str, Any],
